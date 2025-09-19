@@ -1,4 +1,4 @@
-module pool
+module github.com/sukasukasuka123/TemplatePoolByGO
 
 go 1.24.0
 
