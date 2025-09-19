@@ -32,9 +32,11 @@ go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.0
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
-	"github.com/sukasukasuka123/TemplatePoolByGO/pool"
+
+	pool "github.com/sukasukasuka123/TemplatePoolByGO"
 )
 
 type MyConn struct {
@@ -63,21 +65,17 @@ func (c *MyConnControl) Ping(conn MyConn) error {
 	// 检查资源是否可用
 	return nil
 }
-```
 
-### 2. 创建资源池
-
-```go
 func main() {
 	control := &MyConnControl{}
 
 	p, err := pool.NewPool[MyConn](
-		2,                   // 最小池大小
-		10,                  // 最大池大小
-		2,                   // 每次扩容数量
-		1,                   // 每次缩容数量
-		5*time.Minute,       // 资源存活时间
-		control,             // 连接控制器
+		2,             // 最小池大小
+		10,            // 最大池大小
+		2,             // 每次扩容数量
+		1,             // 每次缩容数量
+		5*time.Minute, // 资源存活时间
+		control,       // 连接控制器
 	)
 	if err != nil {
 		panic(err)
