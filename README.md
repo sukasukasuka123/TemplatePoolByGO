@@ -26,7 +26,6 @@ go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.0
 
 ## 使用方法
 
-### 1. 定义资源类型并实现 `Conn[T]` 接口
 
 ```go
 package main
