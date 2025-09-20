@@ -17,7 +17,7 @@ func (p *Pool[T]) asyncExpand() {
 	}
 	defer atomic.StoreInt32(&p.isChangeSize, 0)
 	// 循环条件和逻辑放在一起，避免 defer 被循环“积压”
-	for p.nowsize < p.maxsize && p.nowPoolsize < p.nowsize {
+	for p.nowPoolsize < p.maxsize && p.nowPoolsize < p.nowsize {
 		// 新建扩容后的资源池
 		newSize := p.nowPoolsize + p.expandSizeAtOnce
 		if newSize > p.maxsize {
@@ -85,3 +85,4 @@ func (p *Pool[T]) asyncShrink() {
 		}
 	}
 }
+
