@@ -57,12 +57,11 @@ END_OF_MOVE:
 			return
 		}
 		res := &resource[T]{
-			ID:        uuid.New().String(),
+			ID:         uuid.New().String(),
 			createTime: time.Now(),
 			updateTime: time.Now(),
-			Conn:       connect,
+			Conn:       connect,
 		}
-		
 		select {
 		case p.Resources <- res: // 成功放入新通道
 			atomic.AddInt64(&p.nowsize, 1)
@@ -132,6 +131,7 @@ func (p *Pool[T]) asyncShrink() {
 		}
 	}
 }
+
 
 
 
