@@ -62,6 +62,7 @@ END_OF_MOVE:
 			updateTime: time.Now(),
 			Conn:       connect,
 		}
+
 		select {
 		case p.Resources <- res: // 成功放入新通道
 			atomic.AddInt64(&p.nowsize, 1)
@@ -131,6 +132,7 @@ func (p *Pool[T]) asyncShrink() {
 		}
 	}
 }
+
 
 
 
