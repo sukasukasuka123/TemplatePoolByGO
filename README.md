@@ -123,7 +123,6 @@ MIT License
 
 ---
 
-要不要我帮你再优化一下英文 README 的结构，让它看起来更像一个 Go 官方/成熟库的文档（例如加上 **Quickstart** 和 **API Overview** 小节）？
 
 # TemplatePoolByGO
 
