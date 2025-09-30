@@ -1,5 +1,132 @@
 # TemplatePoolByGO
 
+A high-performance, generic, and asynchronous Go resource pool library. It supports dynamic scaling, shrinking, and resource health checks—perfect for managing database connections, network connections, or any resource with a high creation cost.
+
+---
+
+## Features
+
+* **Generics support**: Works with any resource type using Go generics (`any`).
+* **Dynamic scaling**: Automatically expands or shrinks the pool size based on demand.
+* **Resource lifecycle management**: Configurable resource lifetime with automatic cleanup of expired or invalid resources.
+* **Asynchronous resource creation**: When the pool is empty and cannot immediately provide resources, temporary resources can be created asynchronously.
+* **Thread safety**: Concurrently safe with low overhead, implemented using channels, CAS, and atomic operations.
+* **Health checks**: Periodically validates resources and cleans up failures.
+
+---
+
+## Installation
+
+```bash
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.0
+```
+
+Latest version:
+
+```bash
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.1.1
+```
+
+---
+
+## Usage
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	pool "github.com/sukasukasuka123/TemplatePoolByGO"
+)
+
+type MyConn struct {
+	ID int
+}
+
+// Implement the Conn interface
+type MyConnControl struct{}
+
+func (c *MyConnControl) Create() (MyConn, error) {
+	return MyConn{ID: int(time.Now().UnixNano())}, nil
+}
+
+func (c *MyConnControl) Reset(conn MyConn) error {
+	// Reset resource to its initial state
+	return nil
+}
+
+func (c *MyConnControl) Close(conn MyConn) error {
+	// Close resource
+	fmt.Println("Closing connection:", conn.ID)
+	return nil
+}
+
+func (c *MyConnControl) Ping(conn MyConn) error {
+	// Check if the resource is alive
+	return nil
+}
+
+func main() {
+	control := &MyConnControl{}
+
+	p, err := pool.NewPool[MyConn](
+		2,             // Minimum pool size
+		10,            // Maximum pool size
+		2,             // Expand step
+		1,             // Shrink step
+		5*time.Minute, // Resource lifetime
+		control,       // Resource controller
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// Acquire a resource
+	ctx := context.Background()
+	res, err := p.GetResource(ctx, ctx)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Acquired resource:", res.Conn.ID)
+
+	// Return resource
+	p.PutResource(ctx, res)
+}
+```
+
+---
+
+### Advanced Features
+
+* **Auto-scaling**
+  Automatically scales up when resources are insufficient, and scales down when utilization is low.
+
+* **Resource monitoring and cleanup**
+  Resources exceeding `surviveTime` or failing the `Ping` check are automatically closed.
+
+---
+
+## Notes
+
+* The pool is safe for use across multiple goroutines.
+* Temporary resources created when the pool is empty are **not counted** toward the maximum pool size.
+* Ensure the `Conn[T]` interface methods (`Create`, `Reset`, `Close`, `Ping`) are properly implemented to guarantee correct behavior.
+
+---
+
+## License
+
+MIT License
+
+---
+
+要不要我帮你再优化一下英文 README 的结构，让它看起来更像一个 Go 官方/成熟库的文档（例如加上 **Quickstart** 和 **API Overview** 小节）？
+
+# TemplatePoolByGO
+
 
 一个高性能、泛型、异步的 Go 资源池库，支持动态扩容、缩容和资源健康检查，适合数据库连接、网络连接或任何创建代价高的资源管理。
 
