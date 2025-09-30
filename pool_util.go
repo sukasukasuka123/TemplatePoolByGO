@@ -2,6 +2,7 @@ package pool
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,8 +23,7 @@ type resource[T any] struct {
 
 type Pool[T any] struct {
 	// 资源池
-	Resources        chan *resource[T]
-	isChangeSize     int32         // 改动：使用 int32 搭配 atomic
+	Resources        *atomic.Pointer[chan *resource[T]]
 	minisize         int64         // 最小资源数
 	maxsize          int64         // 最大资源数
 	nowsize          int64         // 当前资源数(包括池内池外)
@@ -37,11 +37,8 @@ type Pool[T any] struct {
 	connControl Conn[T] //连接的一些基本函数
 
 	// 相关锁
-	ConnLock           sync.Mutex    // 创建连接锁
-	createResourceLock sync.Mutex    // 创建临时资源锁
-	mu                 sync.RWMutex  // 对资源池大小处理的锁（雾）
-	stopChan           chan struct{} // 用于停止监控协程
-	once               sync.Once     // 确保协程只启动一次
+	stopChan chan struct{} // 用于停止监控协程
+	once     sync.Once     // 确保协程只启动一次
 	// 相关通道
 	expandChan chan struct{} // 扩容信号通道
 	shrinkChan chan struct{} // 缩容信号通道
