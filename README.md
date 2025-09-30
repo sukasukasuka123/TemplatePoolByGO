@@ -1,3 +1,5 @@
+(docs/now.png)
+
 # TemplatePoolByGO
 
 A high-performance, generic, and asynchronous Go resource pool library. It supports dynamic scaling, shrinking, and resource health checks—perfect for managing database connections, network connections, or any resource with a high creation cost.
