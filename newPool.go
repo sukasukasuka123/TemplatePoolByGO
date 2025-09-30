@@ -2,18 +2,19 @@ package pool
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// NewPool 创建一个新的连接池
+// NewPool 创建一个新的资源池（原子无锁版）
 func NewPool[T any](
 	minisize, maxsize, expandSizeAtOnce, shrinkSizeAtOnce int64,
 	surviveTime time.Duration,
 	connControl Conn[T],
 ) (*Pool[T], error) {
-	// 参数检查
+
 	if minisize <= 0 || maxsize <= 0 || minisize > maxsize {
 		return nil, fmt.Errorf("invalid pool size config: minisize=%d, maxsize=%d", minisize, maxsize)
 	}
@@ -21,9 +22,14 @@ func NewPool[T any](
 		return nil, fmt.Errorf("connControl must not be nil")
 	}
 
+	// 创建最小容量 channel
+	ch := make(chan *resource[T], minisize)
+	var atomicCh atomic.Pointer[chan *resource[T]]
+	atomicCh.Store(&ch)
+
 	// 初始化 Pool
 	p := &Pool[T]{
-		Resources:        make(chan *resource[T], minisize),
+		Resources:        &atomicCh,
 		minisize:         minisize,
 		maxsize:          maxsize,
 		nowsize:          0,
@@ -32,31 +38,39 @@ func NewPool[T any](
 		shrinkSizeAtOnce: shrinkSizeAtOnce,
 		surviveTime:      surviveTime,
 		connControl:      connControl,
+		expandChan:       make(chan struct{}, 1),
+		shrinkChan:       make(chan struct{}, 1),
+		stopChan:         make(chan struct{}),
 	}
 
-	// 预先创建最小数量的资源
+	// 预创建最小数量的资源
 	for i := int64(0); i < minisize; i++ {
 		conn, err := connControl.Create()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create initial resource: %w", err)
 		}
 		res := &resource[T]{
-			ID:         uuid.New().String(), // 其实我是想拿一个地址值转int64的
+			ID:         uuid.New().String(),
 			createTime: time.Now(),
 			updateTime: time.Now(),
 			Conn:       conn,
 		}
-		p.Resources <- res
+
+		// 放入 channel
+		resCh := p.Resources.Load()
+		*resCh <- res
 		p.nowsize++
 	}
-	p.expandChan = make(chan struct{}, 1) // 缓冲区为1，防止重复发送信号
-	p.shrinkChan = make(chan struct{}, 1) // 缓冲区为1，防止重复发送信号
-	go p.listenForShrinkSignal()          // 启动监听协程
-	go p.listenForExpandSignal()          // 启动监听协程
-	p.stopChan = make(chan struct{})
+
+	// 启动扩容/缩容监听
+	go p.listenForExpandSignal()
+	go p.listenForShrinkSignal()
+
+	// 启动监控
 	p.once.Do(func() {
 		go p.monitor()
 	})
+
 	return p, nil
 }
 
