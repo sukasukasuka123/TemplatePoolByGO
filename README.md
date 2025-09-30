@@ -24,7 +24,7 @@ go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.0
 Latest version:
 
 ```bash
-go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.2
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.2.1
 ```
 
 ---
@@ -149,7 +149,7 @@ go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.0
 ```
 最新版本：
 ```bash
-go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.2
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.2.1
 ```
 ---
 
