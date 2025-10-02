@@ -1,4 +1,7 @@
-![高并发下的资源消耗对比](now.png)
+![compare](image/allocs.png)
+![compare](image/latency.png)
+![compare](image/memory.png)
+
 
 # TemplatePoolByGO
 
