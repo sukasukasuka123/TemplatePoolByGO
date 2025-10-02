@@ -1,9 +1,9 @@
 ![compare](image/allocs.png)
-allocs(三个库的延迟对比)
+allocs(三个库的分配次数对比)
 ![compare](image/latency.png)
-latency(三个库的内存消耗对比)
+latency(三个库的延迟对比)
 ![compare](image/memory.png)
-memory(三个库的分配次数对比)
+memory(三个库的内存消耗对比)
 
 # TemplatePoolByGO
 
