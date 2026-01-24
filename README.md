@@ -1,4 +1,4 @@
-# 泛型资源池 (Generic Resource Pool)
+# 泛型资源池 (github.com/sukasukasuka123/TemplatePoolByGO)
 
 一个基于 Go 泛型的高性能连接池实现，支持动态扩缩容、自动重连和并发安全的资源管理。
 
