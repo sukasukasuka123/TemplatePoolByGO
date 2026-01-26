@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	. "3DsharingSquare/util/pool"
+	. "github.com/sukasukasuka123/TemplatePoolByGO"
 
 	_ "github.com/go-sql-driver/mysql"
 )

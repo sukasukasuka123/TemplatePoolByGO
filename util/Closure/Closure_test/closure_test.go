@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	closure "3DsharingSquare/util/Closure"
+	closure "github.com/sukasukasuka123/TemplatePoolByGO/util/Closure"
 )
 
 // ───────────────────────────────────────────────

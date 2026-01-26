@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	. "3DsharingSquare/util/pool"
+	. "github.com/sukasukasuka123/TemplatePoolByGO"
 )
 
 // 压测配置

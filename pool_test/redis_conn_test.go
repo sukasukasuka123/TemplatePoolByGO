@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	. "3DsharingSquare/util/pool"
+	. "github.com/sukasukasuka123/TemplatePoolByGO"
 
 	"github.com/redis/go-redis/v9"
 )
