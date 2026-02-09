@@ -210,3 +210,199 @@
   => 结果: 成功=32065 | 失败=0 | 吞吐=27018.81 ops/s | 峰值InUse=499 | 耗时=1.19s
   => 最终: total=500, available=500, in_use=0
 
+
+=== 压测开始 [2026-02-09 20:54:02] ===
+[20:54:04] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=209.35 ops/s | 峰值InUse=0 | 耗时=0.00s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:05] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=11091.64 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:07] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=10000 | 失败=0 | 吞吐=11354.25 ops/s | 峰值InUse=49 | 耗时=0.88s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:10] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13618 | 失败=0 | 吞吐=11368.18 ops/s | 峰值InUse=49 | 耗时=1.20s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:12] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=151.70 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:14] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=11441.39 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:16] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=10000 | 失败=0 | 吞吐=11287.80 ops/s | 峰值InUse=49 | 耗时=0.89s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:18] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13543 | 失败=0 | 吞吐=11244.37 ops/s | 峰值InUse=49 | 耗时=1.20s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:21] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=116.01 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:22] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=11450.43 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:24] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=10000 | 失败=0 | 吞吐=11277.09 ops/s | 峰值InUse=49 | 耗时=0.89s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:26] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13532 | 失败=0 | 吞吐=11208.36 ops/s | 峰值InUse=49 | 耗时=1.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:29] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=86.31 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:31] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=6914.43 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:33] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=8085 | 失败=0 | 吞吐=11337.33 ops/s | 峰值InUse=49 | 耗时=0.71s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:35] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13598 | 失败=0 | 吞吐=11201.81 ops/s | 峰值InUse=49 | 耗时=1.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:38] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=62.38 ops/s | 峰值InUse=0 | 耗时=0.02s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:39] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=73 | 失败=0 | 吞吐=4737.74 ops/s | 峰值InUse=0 | 耗时=0.02s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:41] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=5622 | 失败=0 | 吞吐=11376.99 ops/s | 峰值InUse=49 | 耗时=0.49s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:43] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13645 | 失败=0 | 吞吐=11395.93 ops/s | 峰值InUse=49 | 耗时=1.20s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:46] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=4.88 ops/s | 峰值InUse=0 | 耗时=0.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:48] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=4 | 失败=0 | 吞吐=19.13 ops/s | 峰值InUse=0 | 耗时=0.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:49] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=22 | 失败=0 | 吞吐=104.60 ops/s | 峰值InUse=0 | 耗时=0.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:51] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=124 | 失败=0 | 吞吐=599.42 ops/s | 峰值InUse=0 | 耗时=0.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:53] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=717 | 失败=0 | 吞吐=3480.19 ops/s | 峰值InUse=0 | 耗时=0.21s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:55] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=4161 | 失败=0 | 吞吐=11551.91 ops/s | 峰值InUse=49 | 耗时=0.36s
+  => 最终: total=50, available=50, in_use=0
+
+[20:54:57] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=13852 | 失败=0 | 吞吐=11488.27 ops/s | 峰值InUse=49 | 耗时=1.21s
+  => 最终: total=50, available=50, in_use=0
+
+
+=== 压测开始 [2026-02-09 21:14:18] ===
+[21:14:20] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=207.24 ops/s | 峰值InUse=0 | 耗时=0.00s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:22] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=10958.54 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=60, available=50, in_use=0
+
+[21:14:23] 并发=1000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1915 | 失败=0 | 吞吐=1437.51 ops/s | 峰值InUse=486 | 耗时=1.33s
+  => 最终: total=500, available=500, in_use=0
+
+[21:14:26] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=218.78 ops/s | 峰值InUse=0 | 耗时=0.00s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:28] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=100 | 失败=0 | 吞吐=9106.14 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=60, available=50, in_use=0
+
+[21:14:29] 并发=2000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=5828 | 失败=0 | 吞吐=4268.00 ops/s | 峰值InUse=500 | 耗时=1.37s
+  => 最终: total=500, available=500, in_use=0
+
+[21:14:32] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=62.47 ops/s | 峰值InUse=0 | 耗时=0.02s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:34] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=73 | 失败=0 | 吞吐=8892.35 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=60, available=50, in_use=0
+
+[21:14:36] 并发=4000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=4315 | 失败=0 | 吞吐=3188.11 ops/s | 峰值InUse=500 | 耗时=1.35s
+  => 最终: total=500, available=500, in_use=0
+
+[21:14:39] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=79.58 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:40] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=96 | 失败=0 | 吞吐=7425.74 ops/s | 峰值InUse=0 | 耗时=0.01s
+  => 最终: total=60, available=50, in_use=0
+
+[21:14:42] 并发=6000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=5740 | 失败=0 | 吞吐=4203.90 ops/s | 峰值InUse=497 | 耗时=1.37s
+  => 最终: total=500, available=500, in_use=0
+
+[21:14:45] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=58.40 ops/s | 峰值InUse=0 | 耗时=0.02s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:46] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=69 | 失败=0 | 吞吐=3118.35 ops/s | 峰值InUse=0 | 耗时=0.02s
+  => 最终: total=70, available=60, in_use=0
+
+[21:14:48] 并发=8000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=2020 | 失败=0 | 吞吐=1520.84 ops/s | 峰值InUse=500 | 耗时=1.33s
+  => 最终: total=500, available=500, in_use=0
+
+[21:14:51] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=1 | 失败=0 | 吞吐=4.92 ops/s | 峰值InUse=0 | 耗时=0.20s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:53] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=4 | 失败=0 | 吞吐=19.64 ops/s | 峰值InUse=0 | 耗时=0.20s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:55] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=22 | 失败=0 | 吞吐=94.27 ops/s | 峰值InUse=0 | 耗时=0.23s
+  => 最终: total=50, available=50, in_use=0
+
+[21:14:56] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=112 | 失败=0 | 吞吐=511.20 ops/s | 峰值InUse=0 | 耗时=0.22s
+  => 最终: total=160, available=150, in_use=0
+
+[21:14:58] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=544 | 失败=0 | 吞吐=2676.08 ops/s | 峰值InUse=0 | 耗时=0.20s
+  => 最终: total=150, available=140, in_use=0
+
+[21:15:00] 并发=100000 | 初始: total=50, available=50, in_use=0
+  => 结果: 成功=2887 | 失败=0 | 吞吐=2161.00 ops/s | 峰值InUse=479 | 耗时=1.34s
+  => 最终: total=500, available=500, in_use=0
+

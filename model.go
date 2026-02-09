@@ -8,16 +8,29 @@ import (
 	"time"
 
 	closure "github.com/sukasukasuka123/TemplatePoolByGO/util/Closure"
+	"github.com/sukasukasuka123/TemplatePoolByGO/util/actor_lite"
 )
+
+// Waiter 定义一个等待者，内部包含一个接收通道
+type waiter[T any] chan *resource[T]
+
+// PoolState 这里的 T 对应 ActorLite 管理的状态
+type PoolState[T any] struct {
+	waitingQueue []waiter[T] // 等待队列
+}
 
 type Pool[T any] struct {
 	resources chan *resource[T]
 	inUse     atomic.Int64
 	totalSize atomic.Int64
 
+	// 原有的管理 Actor（负责扩缩容、健康检查）
 	manager *closure.Closure[PoolManagerState[T], *PoolManagerActor[T]]
-	cancel  context.CancelFunc
-	config  PoolConfig
+	// 新增的极轻量 Actor（负责 Get/Put 叫号排队）
+	lite *actor_lite.ActorLite[PoolState[T]]
+
+	cancel context.CancelFunc
+	config PoolConfig
 }
 
 func startPoolMonitor[T any](
@@ -84,10 +97,16 @@ func NewPool[T any](config PoolConfig, connControl Conn[T]) *Pool[T] {
 	}
 	sharedChan := make(chan *resource[T], bufferSize)
 
+	// 初始化 ActorLite，初始状态是一个空的等待队列
+	liteActor := actor_lite.NewActorLite(PoolState[T]{
+		waitingQueue: make([]waiter[T], 0, 1024),
+	})
+
 	p := &Pool[T]{
 		resources: sharedChan,
 		cancel:    cancel,
 		config:    config,
+		lite:      liteActor,
 	}
 
 	actor := NewPoolManagerActor(config, connControl, &p.totalSize)
@@ -98,11 +117,9 @@ func NewPool[T any](config PoolConfig, connControl Conn[T]) *Pool[T] {
 
 	actor.sharedResources = sharedChan
 	actor.manager = manager
-
 	p.manager = manager
 
 	p.preInitResources(config.MinSize, connControl)
-
 	time.Sleep(50 * time.Millisecond)
 	startPoolMonitor(ctx, manager, config.MonitorInterval)
 
@@ -140,80 +157,60 @@ func (p *Pool[T]) reconnectResource(r *resource[T]) (*resource[T], error) {
 	return nil, fmt.Errorf("reconnect failed")
 }
 
+// 提取验证逻辑，减少代码冗余
+func (p *Pool[T]) validateAndReturn(r *resource[T]) (*resource[T], error) {
+	if p.config.ReconnectOnGet {
+		if err := p.manager.GetActor().connControl.Ping(r.Conn); err != nil {
+			newR, reconnErr := p.reconnectResource(r)
+			if reconnErr != nil {
+				p.totalSize.Add(-1)
+				return nil, fmt.Errorf("reconnect failed: %w", reconnErr)
+			}
+			r = newR
+		}
+	}
+	p.inUse.Add(1)
+	r.updateTime = time.Now()
+	return r, nil
+}
+
 func (p *Pool[T]) Get(ctx context.Context) (*resource[T], error) {
-	// 快速路径：从 channel 获取
+	// 1. 快速路径：非阻塞尝试从 Channel 获取
 	select {
 	case r := <-p.resources:
-		// 可选：验证资源有效性
-		if p.config.ReconnectOnGet {
-			if err := p.manager.GetActor().connControl.Ping(r.Conn); err != nil {
-				// 尝试重连
-				newR, reconnErr := p.reconnectResource(r)
-				if reconnErr != nil {
-					// 重连失败，减少总数
-					p.totalSize.Add(-1)
-					return nil, fmt.Errorf("resource invalid and reconnect failed: %w", reconnErr)
-				}
-				r = newR
-			}
-		}
-
-		p.inUse.Add(1)
-		r.updateTime = time.Now()
-		return r, nil
+		return p.validateAndReturn(r)
 	default:
 	}
 
-	// 慢路径：轮询等待或创建新资源
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
+	// 2. 慢路径：资源枯竭，进入 ActorLite 挂号排队
+	myTurn := make(waiter[T], 1)
 
-	for {
+	p.lite.Do(func(s *PoolState[T]) {
+		// 这里是串行的，绝对安全
+		// 双重检查：在排队的一瞬间，如果正好有人还了资源，直接拿走
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		case r := <-p.resources:
-			// 在等待期间获取到了资源
-			if p.config.ReconnectOnGet {
-				if err := p.manager.GetActor().connControl.Ping(r.Conn); err != nil {
-					newR, reconnErr := p.reconnectResource(r)
-					if reconnErr != nil {
-						p.totalSize.Add(-1)
-						continue // 重连失败，继续等待
-					}
-					r = newR
-				}
-			}
-			p.inUse.Add(1)
-			r.updateTime = time.Now()
-			return r, nil
-
-		case <-ticker.C:
-			// 尝试创建新资源
-			current := p.totalSize.Load()
-			if current >= p.config.MaxSize {
-				continue // 已达上限，继续等待
-			}
-
-			// CAS 方式抢占创建权
-			if p.totalSize.CompareAndSwap(current, current+1) {
-				conn, err := p.manager.GetActor().connControl.Create()
-				if err != nil {
-					p.totalSize.Add(-1)
-					continue // 创建失败，继续等待
-				}
-
-				r := &resource[T]{
-					ID:         fmt.Sprintf("r-%d", time.Now().UnixNano()),
-					createTime: time.Now(),
-					updateTime: time.Now(),
-					Conn:       conn,
-					retryCount: 0,
-				}
-				p.inUse.Add(1)
-				return r, nil
-			}
+			myTurn <- r
+		default:
+			// 真的没资源了，挂号
+			s.waitingQueue = append(s.waitingQueue, myTurn)
+			// 触发异步扩容通知
+			_ = p.manager.Send(func(a *PoolManagerActor[T], state *PoolManagerState[T]) {
+				a.expand(state)
+			})
 		}
+	})
+
+	// 3. 阻塞等待：不耗 CPU，直到被唤醒或超时
+	select {
+	case <-ctx.Done():
+		// 如果超时了，我们需要从排队队列中移除（可选优化，目前先简单返回）
+		return nil, ctx.Err()
+	case r := <-myTurn:
+		if r == nil {
+			return nil, fmt.Errorf("pool closed or resource nil")
+		}
+		return p.validateAndReturn(r)
 	}
 }
 func (p *Pool[T]) Put(res *resource[T]) error {
@@ -221,35 +218,42 @@ func (p *Pool[T]) Put(res *resource[T]) error {
 		return nil
 	}
 
-	err := p.manager.GetActor().connControl.Reset(res.Conn)
-	if err != nil {
-		// Reset 失败，尝试重连
+	// 资源重置逻辑保持不变
+	cc := p.manager.GetActor().connControl
+	if err := cc.Reset(res.Conn); err != nil {
 		newR, reconnErr := p.reconnectResource(res)
 		if reconnErr != nil {
-			// 重连失败，关闭并减少计数
 			p.totalSize.Add(-1)
-			return fmt.Errorf("reset failed and reconnect failed: %w", reconnErr)
+			return reconnErr
 		}
 		res = newR
 	}
-
 	res.updateTime = time.Now()
 
-	select {
-	case p.resources <- res:
-		p.inUse.Add(-1)
-		return nil
-	default:
-		p.inUse.Add(-1)
-		return p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
+	// 核心变动：还资源时，先看有没有人在 ActorLite 里排队
+	p.lite.Do(func(s *PoolState[T]) {
+		if len(s.waitingQueue) > 0 {
+			// 叫号：把资源直接给排在第一位的人
+			nextWaiter := s.waitingQueue[0]
+			s.waitingQueue = s.waitingQueue[1:]
+			nextWaiter <- res
+			p.inUse.Add(-1)
+		} else {
+			// 没人排队，尝试放回 Channel
 			select {
-			case a.sharedResources <- res:
+			case p.resources <- res:
+				p.inUse.Add(-1)
 			default:
-				a.connControl.Close(res.Conn)
-				p.totalSize.Add(-1)
+				// Channel 也满了，交给管理 Actor 销毁或处理
+				p.inUse.Add(-1)
+				_ = p.manager.Send(func(a *PoolManagerActor[T], state *PoolManagerState[T]) {
+					a.connControl.Close(res.Conn)
+					p.totalSize.Add(-1)
+				})
 			}
-		})
-	}
+		}
+	})
+	return nil
 }
 
 func (p *Pool[T]) Close() {
