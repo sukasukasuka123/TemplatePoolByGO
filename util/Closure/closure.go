@@ -71,7 +71,7 @@ func WithTimeout(timeout time.Duration) Option {
 // New 创建一个新的 Closure Actor
 func New[T any, A Actor[T]](actor A, opts ...Option) *Closure[T, A] {
 	cfg := &config{
-		inboxSize: 100,
+		inboxSize: 10000,
 		timeout:   0, // 默认不超时
 	}
 	for _, opt := range opts {
