@@ -121,7 +121,7 @@ func BenchmarkStress_GetPut_RealUse(b *testing.B) {
 				MaxSize:          int64(stressMaxSize),
 				SurviveTime:      stressSurvive,
 				MonitorInterval:  stressMonitor,
-				IdleBufferFactor: 1.0, // 提高缓冲因子，减少慢路径
+				IdleBufferFactor: 0.6, // 从1变成0.6
 				MaxRetries:       3,
 				RetryInterval:    200 * time.Millisecond, // 缩短重试间隔
 				ReconnectOnGet:   false,                  // 压测时关闭重连检查

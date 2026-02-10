@@ -50,6 +50,7 @@ func (a *PoolManagerActor[T]) Init() PoolManagerState[T] {
 }
 
 // checkAndAdjust 检测并调整池大小（更敏感的扩容触发条件）
+// ===== 核心修复：扩容逻辑不应该依赖 buffer 的 idleRatio =====
 func (a *PoolManagerActor[T]) checkAndAdjust(s *PoolManagerState[T]) {
 	if !a.initialized.Load() {
 		return
@@ -60,29 +61,43 @@ func (a *PoolManagerActor[T]) checkAndAdjust(s *PoolManagerState[T]) {
 	waiting := int64(a.waitQueue.Len())
 	currentTotal := a.poolTotalSize.Load()
 	expandingCount := a.expanding.Load()
+	effectiveTotal := currentTotal + expandingCount
 
-	// ============ 扩容逻辑（更敏感的触发条件）============
+	// ===== 正确的扩容逻辑 =====
+	// 不要用 idleRatio，而是直接看：
+	// 1. 是否有人在等（有需求）
+	// 2. 总连接数是否达到上限（有空间）
 
-	// 条件 A: 有人在排队（最高优先级）
-	// 条件 B: 空闲率低于 70%（原来是 65%，现在提高阈值更敏感）
-	// 条件 C: 考虑正在扩容中的连接数
+	shouldExpand := false
 
-	idleRatio := float64(poolLen) / float64(capacity)
-	effectiveTotal := currentTotal + expandingCount // 包含正在创建的连接
+	// 条件 1：有人在排队（最高优先级）
+	if waiting > 0 && effectiveTotal < s.config.MaxSize {
+		shouldExpand = true
+	}
 
-	shouldExpand := (waiting > 0 || idleRatio < 0.70) && effectiveTotal < s.config.MaxSize
+	// 条件 2：空闲连接不足（基于 buffer 利用率）
+	// 但这里的判断应该是：如果 buffer 快满了，说明空闲连接很多，不需要扩容
+	// 如果 buffer 很空，说明连接都在用，可能需要扩容
+	if !shouldExpand && effectiveTotal < s.config.MaxSize {
+		// 关键修改：只有当 buffer 利用率低（空闲少）且还没到 MaxSize 时才扩容
+		bufferUtilization := float64(poolLen) / float64(capacity)
+		if bufferUtilization < 0.3 { // buffer 利用率低于 30%，说明大部分连接都在用
+			shouldExpand = true
+		}
+	}
 
 	if shouldExpand {
 		expandSize := a.calculateExpandSize(s, waiting, effectiveTotal)
 		if expandSize > 0 {
 			a.expand(s, expandSize)
 		}
-		return // 触发扩容后直接返回，不执行缩容检查
+		return
 	}
 
-	// ============ 缩容逻辑 ============
-	// 空闲很多（> 85%，提高阈值避免频繁缩容），且完全没人在等，且没有正在扩容的
-	if idleRatio > 0.85 && waiting == 0 && expandingCount == 0 && currentTotal > s.config.MinSize {
+	// ===== 缩容逻辑 =====
+	// 只有当空闲连接很多（buffer 快满）且没人等待时才缩容
+	bufferUtilization := float64(poolLen) / float64(capacity)
+	if bufferUtilization > 0.9 && waiting == 0 && expandingCount == 0 && currentTotal > s.config.MinSize {
 		a.shrink(s)
 	}
 }
@@ -118,7 +133,7 @@ func (a *PoolManagerActor[T]) calculateExpandSize(s *PoolManagerState[T], waitin
 
 	// ============ 压力补偿逻辑 ============
 	// 如果排队人数很多，baseStep 可能跟不上
-	// 取等待人数的 1/3 作为压力补偿（原来是 1/4，现在更激进）
+	// 取等待人数的 1/3 作为压力补偿
 	pressureStep := waiting / 3
 	if waiting > 100 { // 如果等待人数超过100，进一步加速
 		pressureStep = waiting / 2
@@ -132,7 +147,7 @@ func (a *PoolManagerActor[T]) calculateExpandSize(s *PoolManagerState[T], waitin
 
 	// ============ 限制和保护 ============
 	// 单次扩容不宜超过 MaxSize 的 25%（原来是 20%，现在允许更大步长）
-	limit := maxSize / 4
+	limit := maxSize / 3
 	if step > limit {
 		step = limit
 	}
@@ -150,25 +165,19 @@ func (a *PoolManagerActor[T]) calculateExpandSize(s *PoolManagerState[T], waitin
 	return step
 }
 
-// expand 异步扩容（高并发优化）
 func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
-	// 二次校验
 	if a.poolTotalSize.Load()+a.expanding.Load() >= s.config.MaxSize {
 		return
 	}
 
-	// ============ 高并发扩容优化 ============
-	// 信号量并发数：200（原来是100，现在提高并发度）
-	// 这意味着可以同时创建200个连接，大幅提升扩容速度
-	sem := make(chan struct{}, 200)
+	sem := make(chan struct{}, 500)
 
 	for i := int64(0); i < expandSize; i++ {
-		// 预先占位，避免重复扩容
 		newExpanding := a.expanding.Add(1)
 		newTotal := a.poolTotalSize.Load() + newExpanding
 
 		if newTotal > s.config.MaxSize {
-			a.expanding.Add(-1) // 回退
+			a.expanding.Add(-1)
 			break
 		}
 
@@ -176,28 +185,24 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 		go func(idx int64) {
 			defer func() {
 				<-sem
-				a.expanding.Add(-1) // 扩容完成，减少计数
+				a.expanding.Add(-1)
 			}()
 
 			var conn T
 			var err error
 
-			// 重试逻辑：最多3次，间隔缩短
 			for retry := 0; retry < 3; retry++ {
 				conn, err = a.connControl.Create()
 				if err == nil {
 					break
 				}
-				// 压测时重试间隔缩短
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 			}
 
 			if err != nil {
-				// 创建失败，不增加 totalSize
 				return
 			}
 
-			// 成功创建连接
 			a.poolTotalSize.Add(1)
 
 			res := &resource[T]{
@@ -207,17 +212,15 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 				Conn:       conn,
 			}
 
-			// ============ 资源分发策略 ============
-			// 1. 优先送给正在排队的 Get 请求（资源直达）
+			// 资源直达
 			if a.waitQueue.TryDequeue(res) {
 				return
 			}
 
-			// 2. 没人要，放回共享池
+			// 放回池子（这里可能会因为 buffer 满而失败，但没关系）
 			select {
 			case a.sharedResources <- res:
 			default:
-				// 3. 池子满了（可能并发竞争或缩容），关闭连接
 				a.connControl.Close(conn)
 				a.poolTotalSize.Add(-1)
 			}
