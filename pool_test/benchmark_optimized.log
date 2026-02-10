@@ -1,0 +1,921 @@
+
+=== 优化后压测开始 [2026-02-10 14:16:10] ===
+
+[14:16:11] 并发=1000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 180.50 ops/s
+     平均延迟: 5.54 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:12] 并发=1000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 100
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 9400.35 ops/s
+     平均延迟: 7.60 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:13] 并发=1000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 10000
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 74202.86 ops/s
+     平均延迟: 63.28 ms
+     总耗时: 0.13 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 7684
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:14] 并发=1000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 88801
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 89145.24 ops/s
+     平均延迟: 74.24 ms
+     总耗时: 1.00 s
+  => 峰值指标:
+     最大使用中: 500
+     最大等待数: 7808
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:16] 并发=1000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 106984
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88763.11 ops/s
+     平均延迟: 76.30 ms
+     总耗时: 1.21 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 7808
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:18] 并发=2000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 144.59 ops/s
+     平均延迟: 5.91 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:19] 并发=2000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 100
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 9494.96 ops/s
+     平均延迟: 7.45 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:20] 并发=2000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 10000
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 67951.96 ops/s
+     平均延迟: 68.82 ms
+     总耗时: 0.15 s
+  => 峰值指标:
+     最大使用中: 439
+     最大等待数: 8559
+     最大扩容中: 0
+  => 最终状态:
+     total=440, available=440, in_use=0, waiting=0, expanding=0
+
+
+[14:16:21] 并发=2000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 81495
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 87083.60 ops/s
+     平均延迟: 141.43 ms
+     总耗时: 0.94 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 13266
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:23] 并发=2000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 104484
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88675.63 ops/s
+     平均延迟: 137.26 ms
+     总耗时: 1.18 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12745
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:25] 并发=4000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 103.06 ops/s
+     平均延迟: 5.12 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:26] 并发=4000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 100
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 9554.47 ops/s
+     平均延迟: 7.40 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:27] 并发=4000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 10000
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 51344.82 ops/s
+     平均延迟: 96.78 ms
+     总耗时: 0.19 s
+  => 峰值指标:
+     最大使用中: 314
+     最大等待数: 9181
+     最大扩容中: 0
+  => 最终状态:
+     total=315, available=315, in_use=0, waiting=0, expanding=0
+
+
+[14:16:28] 并发=4000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 61576
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 86852.89 ops/s
+     平均延迟: 126.45 ms
+     总耗时: 0.71 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 11998
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:30] 并发=4000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 104200
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88096.04 ops/s
+     平均延迟: 138.12 ms
+     总耗时: 1.18 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12709
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:32] 并发=6000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 87.12 ops/s
+     平均延迟: 5.16 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:33] 并发=6000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 100
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 8038.59 ops/s
+     平均延迟: 7.27 ms
+     总耗时: 0.01 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:34] 并发=6000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 9519
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 33730.89 ops/s
+     平均延迟: 141.11 ms
+     总耗时: 0.28 s
+  => 峰值指标:
+     最大使用中: 189
+     最大等待数: 8828
+     最大扩容中: 0
+  => 最终状态:
+     total=190, available=190, in_use=0, waiting=0, expanding=0
+
+
+[14:16:36] 并发=6000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 40477
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 83848.33 ops/s
+     平均延迟: 132.76 ms
+     总耗时: 0.48 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 13177
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:37] 并发=6000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 100562
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88182.04 ops/s
+     平均延迟: 133.00 ms
+     总耗时: 1.14 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12254
+     最大扩容中: 0
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:39] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 62.26 ops/s
+     平均延迟: 5.53 ms
+     总耗时: 0.02 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:40] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 74
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 4880.27 ops/s
+     平均延迟: 6.27 ms
+     总耗时: 0.02 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:41] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 5580
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 11924.11 ops/s
+     平均延迟: 233.41 ms
+     总耗时: 0.47 s
+  => 峰值指标:
+     最大使用中: 64
+     最大等待数: 5015
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:43] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 14295
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 53601.90 ops/s
+     平均延迟: 130.64 ms
+     总耗时: 0.27 s
+  => 峰值指标:
+     最大使用中: 314
+     最大等待数: 12979
+     最大扩容中: 0
+  => 最终状态:
+     total=315, available=315, in_use=0, waiting=0, expanding=0
+
+
+[14:16:44] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 64341
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 86959.03 ops/s
+     平均延迟: 132.12 ms
+     总耗时: 0.74 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12553
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:46] 并发=8000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 104356
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88033.63 ops/s
+     平均延迟: 137.88 ms
+     总耗时: 1.19 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12725
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:48] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 47.38 ops/s
+     平均延迟: 5.32 ms
+     总耗时: 0.02 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:49] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 56
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 2829.40 ops/s
+     平均延迟: 5.33 ms
+     总耗时: 0.02 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:50] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 3379
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 11943.65 ops/s
+     平均延迟: 140.88 ms
+     总耗时: 0.28 s
+  => 峰值指标:
+     最大使用中: 64
+     最大等待数: 2814
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:16:51] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 14322
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 70729.35 ops/s
+     平均延迟: 96.51 ms
+     总耗时: 0.20 s
+  => 峰值指标:
+     最大使用中: 439
+     最大等待数: 12879
+     最大扩容中: 0
+  => 最终状态:
+     total=440, available=440, in_use=0, waiting=0, expanding=0
+
+
+[14:16:53] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 84876
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 86784.99 ops/s
+     平均延迟: 129.14 ms
+     总耗时: 0.98 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 11810
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:55] 并发=10000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 104143
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 87578.34 ops/s
+     平均延迟: 139.04 ms
+     总耗时: 1.19 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12705
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:16:57] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 23.99 ops/s
+     平均延迟: 5.51 ms
+     总耗时: 0.04 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:58] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 27
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 680.06 ops/s
+     平均延迟: 5.51 ms
+     总耗时: 0.04 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:16:59] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 816
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 11894.02 ops/s
+     平均延迟: 36.00 ms
+     总耗时: 0.07 s
+  => 峰值指标:
+     最大使用中: 62
+     最大等待数: 248
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:00] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 14286
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 71988.74 ops/s
+     平均延迟: 93.90 ms
+     总耗时: 0.20 s
+  => 峰值指标:
+     最大使用中: 439
+     最大等待数: 12731
+     最大扩容中: 125
+  => 最终状态:
+     total=440, available=440, in_use=0, waiting=0, expanding=0
+
+
+[14:17:01] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 86362
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88668.37 ops/s
+     平均延迟: 128.82 ms
+     总耗时: 0.97 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12021
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:17:03] 并发=20000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 106334
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88131.36 ops/s
+     平均延迟: 140.72 ms
+     总耗时: 1.21 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12976
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:17:05] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 10.05 ops/s
+     平均延迟: 5.13 ms
+     总耗时: 0.10 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:17:06] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 10
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 82.49 ops/s
+     平均延迟: 5.35 ms
+     总耗时: 0.12 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:17:08] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 98
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 960.75 ops/s
+     平均延迟: 7.73 ms
+     总耗时: 0.10 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:09] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1149
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 10879.07 ops/s
+     平均延迟: 48.48 ms
+     总耗时: 0.11 s
+  => 峰值指标:
+     最大使用中: 64
+     最大等待数: 584
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:10] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 13030
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 70274.07 ops/s
+     平均延迟: 87.01 ms
+     总耗时: 0.19 s
+  => 峰值指标:
+     最大使用中: 439
+     最大等待数: 11588
+     最大扩容中: 125
+  => 最终状态:
+     total=440, available=440, in_use=0, waiting=0, expanding=0
+
+
+[14:17:11] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 84294
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 88004.38 ops/s
+     平均延迟: 126.24 ms
+     总耗时: 0.96 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 11725
+     最大扩容中: 60
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:17:13] 并发=50000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 105596
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 87852.41 ops/s
+     平均延迟: 140.61 ms
+     总耗时: 1.20 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12883
+     最大扩容中: 125
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:17:15] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 1
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 4.78 ops/s
+     平均延迟: 5.39 ms
+     总耗时: 0.21 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:17:16] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 4
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 17.41 ops/s
+     平均延迟: 5.23 ms
+     总耗时: 0.23 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:17:18] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 20
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 80.92 ops/s
+     平均延迟: 6.10 ms
+     总耗时: 0.25 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=50, available=50, in_use=0, waiting=0, expanding=0
+
+
+[14:17:19] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 96
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 420.49 ops/s
+     平均延迟: 7.20 ms
+     总耗时: 0.23 s
+  => 峰值指标:
+     最大使用中: 0
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:20] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 504
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 2475.86 ops/s
+     平均延迟: 23.17 ms
+     总耗时: 0.20 s
+  => 峰值指标:
+     最大使用中: 2
+     最大等待数: 0
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:21] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 2970
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 12442.40 ops/s
+     平均延迟: 119.18 ms
+     总耗时: 0.24 s
+  => 峰值指标:
+     最大使用中: 64
+     最大等待数: 2404
+     最大扩容中: 0
+  => 最终状态:
+     total=65, available=65, in_use=0, waiting=0, expanding=0
+
+
+[14:17:23] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 14924
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 61210.80 ops/s
+     平均延迟: 97.49 ms
+     总耗时: 0.24 s
+  => 峰值指标:
+     最大使用中: 439
+     最大等待数: 12984
+     最大扩容中: 83
+  => 最终状态:
+     total=440, available=440, in_use=0, waiting=0, expanding=0
+
+
+[14:17:24] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 73107
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 86465.35 ops/s
+     平均延迟: 128.25 ms
+     总耗时: 0.85 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 11869
+     最大扩容中: 0
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+
+[14:17:26] 并发=100000 | 初始状态:
+  total=50, available=50, in_use=0, waiting=0, expanding=0
+  => 压测结果:
+     成功操作: 103744
+     失败操作: 0
+     超时操作: 0
+     吞吐量: 87553.56 ops/s
+     平均延迟: 138.23 ms
+     总耗时: 1.18 s
+  => 峰值指标:
+     最大使用中: 499
+     最大等待数: 12649
+     最大扩容中: 0
+  => 最终状态:
+     total=500, available=500, in_use=0, waiting=0, expanding=0
+
+=== 压测结束 [2026-02-10 14:17:27] ===

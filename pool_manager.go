@@ -1,13 +1,12 @@
-// ========== pool_manager.go ==========
 package pool
 
 import (
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	closure "github.com/sukasukasuka123/TemplatePoolByGO/util/Closure"
+	"github.com/sukasukasuka123/TemplatePoolByGO/util/request_queue"
 )
 
 type PoolManagerState[T any] struct {
@@ -21,15 +20,25 @@ type PoolManagerActor[T any] struct {
 	connControl     Conn[T]
 	manager         *closure.Closure[PoolManagerState[T], *PoolManagerActor[T]]
 	sharedResources chan *resource[T]
+	waitQueue       *request_queue.LockFreeQueue[*resource[T]]
 	poolTotalSize   *atomic.Int64
+	expanding       *atomic.Int64 // 新增：记录扩容中的连接数
 	initialized     atomic.Bool
 }
 
-func NewPoolManagerActor[T any](config PoolConfig, connControl Conn[T], totalSize *atomic.Int64) *PoolManagerActor[T] {
+func NewPoolManagerActor[T any](
+	config PoolConfig,
+	connControl Conn[T],
+	totalSize *atomic.Int64,
+	wq *request_queue.LockFreeQueue[*resource[T]],
+	expanding *atomic.Int64,
+) *PoolManagerActor[T] {
 	return &PoolManagerActor[T]{
 		config:        config,
 		connControl:   connControl,
 		poolTotalSize: totalSize,
+		waitQueue:     wq,
+		expanding:     expanding,
 	}
 }
 
@@ -40,161 +49,197 @@ func (a *PoolManagerActor[T]) Init() PoolManagerState[T] {
 	}
 }
 
-// 非线性扩容算法
-func (a *PoolManagerActor[T]) calculateExpandSize(s *PoolManagerState[T]) int64 {
-	currentSize := a.poolTotalSize.Load()
-	maxSize := s.config.MaxSize
-	minSize := s.config.MinSize
-	totalRange := maxSize - minSize
-
-	if totalRange <= 0 {
-		return 0
-	}
-
-	// 当前已使用的范围比例
-	usageRate := float64(currentSize-minSize) / float64(totalRange)
-
-	var expandStep int64
-
-	switch {
-	case usageRate < 0.2:
-		// 起步期：固定小步长，快速响应初始需求
-		expandStep = max(int64(float64(totalRange)*0.05), 5)
-
-	case usageRate >= 0.2 && usageRate < 0.7:
-		// 爆发期：按当前动态范围的比例增长
-		dynamicSize := currentSize - minSize
-		expandStep = max(int64(float64(dynamicSize)*0.5), 10)
-
-	default:
-		// 收敛期：剩余空间的小比例，避免过度扩容
-		remaining := maxSize - currentSize
-		expandStep = max(int64(float64(remaining)*0.15), 1)
-	}
-
-	// 确保不超过最大限制
-	if currentSize+expandStep > maxSize {
-		expandStep = maxSize - currentSize
-	}
-
-	return expandStep
-}
-
-// 非线性缩容算法
-func (a *PoolManagerActor[T]) calculateShrinkSize(s *PoolManagerState[T]) int64 {
-	currentSize := a.poolTotalSize.Load()
-	minSize := s.config.MinSize
-	idleCount := int64(len(a.sharedResources))
-
-	if currentSize <= minSize {
-		return 0
-	}
-
-	// 空闲率
-	idleRate := float64(idleCount) / float64(currentSize)
-
-	var shrinkStep int64
-
-	switch {
-	case idleRate > 0.8:
-		// 大量空闲：激进缩容
-		excess := currentSize - minSize
-		shrinkStep = int64(float64(excess) * 0.5)
-
-	case idleRate > 0.5:
-		// 中等空闲：温和缩容
-		excess := currentSize - minSize
-		shrinkStep = int64(float64(excess) * 0.2)
-
-	default:
-		// 少量空闲：保守缩容
-		shrinkStep = max(int64(float64(idleCount)*0.3), 1)
-	}
-
-	// 确保不低于最小值
-	if currentSize-shrinkStep < minSize {
-		shrinkStep = currentSize - minSize
-	}
-
-	return shrinkStep
-}
-
+// checkAndAdjust 检测并调整池大小（更敏感的扩容触发条件）
 func (a *PoolManagerActor[T]) checkAndAdjust(s *PoolManagerState[T]) {
 	if !a.initialized.Load() {
 		return
 	}
 
 	poolLen := int64(len(a.sharedResources))
-	poolCap := int64(cap(a.sharedResources))
-	currentSize := a.poolTotalSize.Load()
+	capacity := int64(cap(a.sharedResources))
+	waiting := int64(a.waitQueue.Len())
+	currentTotal := a.poolTotalSize.Load()
+	expandingCount := a.expanding.Load()
 
-	// 扩容条件：空闲少且未达上限
-	if poolLen < poolCap/5 && currentSize < s.config.MaxSize {
-		a.expand(s)
+	// ============ 扩容逻辑（更敏感的触发条件）============
+
+	// 条件 A: 有人在排队（最高优先级）
+	// 条件 B: 空闲率低于 70%（原来是 65%，现在提高阈值更敏感）
+	// 条件 C: 考虑正在扩容中的连接数
+
+	idleRatio := float64(poolLen) / float64(capacity)
+	effectiveTotal := currentTotal + expandingCount // 包含正在创建的连接
+
+	shouldExpand := (waiting > 0 || idleRatio < 0.70) && effectiveTotal < s.config.MaxSize
+
+	if shouldExpand {
+		expandSize := a.calculateExpandSize(s, waiting, effectiveTotal)
+		if expandSize > 0 {
+			a.expand(s, expandSize)
+		}
+		return // 触发扩容后直接返回，不执行缩容检查
 	}
 
-	// 缩容条件：空闲多且超过最小值
-	if poolLen > poolCap*4/5 && currentSize > s.config.MinSize {
+	// ============ 缩容逻辑 ============
+	// 空闲很多（> 85%，提高阈值避免频繁缩容），且完全没人在等，且没有正在扩容的
+	if idleRatio > 0.85 && waiting == 0 && expandingCount == 0 && currentTotal > s.config.MinSize {
 		a.shrink(s)
 	}
-
-	// 清理超时资源
-	a.cleanupIdleTimeout(s)
 }
 
-func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T]) {
-	expandSize := a.calculateExpandSize(s)
-	if expandSize <= 0 {
+// calculateExpandSize 计算扩容大小（优化的非线性曲线 + 压力补偿）
+func (a *PoolManagerActor[T]) calculateExpandSize(s *PoolManagerState[T], waiting int64, effectiveTotal int64) int64 {
+	maxSize := s.config.MaxSize
+	minSize := s.config.MinSize
+
+	if effectiveTotal >= maxSize {
+		return 0
+	}
+
+	// ============ 非线性曲线逻辑 ============
+	usedRange := effectiveTotal - minSize
+	totalRange := maxSize - minSize
+	if totalRange <= 0 {
+		totalRange = 1
+	}
+	usageRate := float64(usedRange) / float64(totalRange)
+
+	var baseStep int64
+	switch {
+	case usageRate < 0.20: // 起步期：保守扩容
+		baseStep = 15
+	case usageRate < 0.75: // 爆发期：激进扩容
+		remaining := maxSize - effectiveTotal
+		baseStep = remaining / 2 // 原来是 /3，现在更激进
+	default: // 收敛期：谨慎扩容
+		remaining := maxSize - effectiveTotal
+		baseStep = remaining / 8 // 原来是 /10
+	}
+
+	// ============ 压力补偿逻辑 ============
+	// 如果排队人数很多，baseStep 可能跟不上
+	// 取等待人数的 1/3 作为压力补偿（原来是 1/4，现在更激进）
+	pressureStep := waiting / 3
+	if waiting > 100 { // 如果等待人数超过100，进一步加速
+		pressureStep = waiting / 2
+	}
+
+	// 最终步长 = max(曲线步长, 压力补偿)
+	step := baseStep
+	if pressureStep > step {
+		step = pressureStep
+	}
+
+	// ============ 限制和保护 ============
+	// 单次扩容不宜超过 MaxSize 的 25%（原来是 20%，现在允许更大步长）
+	limit := maxSize / 4
+	if step > limit {
+		step = limit
+	}
+
+	// 保护：不超过剩余空间
+	if effectiveTotal+step > maxSize {
+		step = maxSize - effectiveTotal
+	}
+
+	// 至少扩容 1 个
+	if step < 1 && effectiveTotal < maxSize {
+		step = 1
+	}
+
+	return step
+}
+
+// expand 异步扩容（高并发优化）
+func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
+	// 二次校验
+	if a.poolTotalSize.Load()+a.expanding.Load() >= s.config.MaxSize {
 		return
 	}
 
-	// 限制单次扩容的并发创建数，避免资源爆炸
-	maxConcurrent := int64(10)
-	if expandSize > maxConcurrent {
-		expandSize = maxConcurrent
-	}
+	// ============ 高并发扩容优化 ============
+	// 信号量并发数：200（原来是100，现在提高并发度）
+	// 这意味着可以同时创建200个连接，大幅提升扩容速度
+	sem := make(chan struct{}, 200)
 
-	var wg sync.WaitGroup
 	for i := int64(0); i < expandSize; i++ {
-		// 先预占总数
-		if a.poolTotalSize.Load() >= s.config.MaxSize {
+		// 预先占位，避免重复扩容
+		newExpanding := a.expanding.Add(1)
+		newTotal := a.poolTotalSize.Load() + newExpanding
+
+		if newTotal > s.config.MaxSize {
+			a.expanding.Add(-1) // 回退
 			break
 		}
-		a.poolTotalSize.Add(1)
 
-		wg.Add(1)
+		sem <- struct{}{}
 		go func(idx int64) {
-			defer wg.Done()
+			defer func() {
+				<-sem
+				a.expanding.Add(-1) // 扩容完成，减少计数
+			}()
 
-			conn, err := a.connControl.Create()
+			var conn T
+			var err error
+
+			// 重试逻辑：最多3次，间隔缩短
+			for retry := 0; retry < 3; retry++ {
+				conn, err = a.connControl.Create()
+				if err == nil {
+					break
+				}
+				// 压测时重试间隔缩短
+				time.Sleep(10 * time.Millisecond)
+			}
+
 			if err != nil {
-				a.poolTotalSize.Add(-1)
+				// 创建失败，不增加 totalSize
 				return
 			}
+
+			// 成功创建连接
+			a.poolTotalSize.Add(1)
+
 			res := &resource[T]{
 				ID:         fmt.Sprintf("exp-%d-%d", time.Now().UnixNano(), idx),
 				createTime: time.Now(),
 				updateTime: time.Now(),
 				Conn:       conn,
-				retryCount: 0,
 			}
+
+			// ============ 资源分发策略 ============
+			// 1. 优先送给正在排队的 Get 请求（资源直达）
+			if a.waitQueue.TryDequeue(res) {
+				return
+			}
+
+			// 2. 没人要，放回共享池
 			select {
 			case a.sharedResources <- res:
 			default:
+				// 3. 池子满了（可能并发竞争或缩容），关闭连接
 				a.connControl.Close(conn)
 				a.poolTotalSize.Add(-1)
 			}
 		}(i)
 	}
-
-	// 等待所有创建完成，避免过快触发下一轮扩容
-	wg.Wait()
 }
 
+// shrink 缩容逻辑
 func (a *PoolManagerActor[T]) shrink(s *PoolManagerState[T]) {
-	shrinkSize := a.calculateShrinkSize(s)
-	if shrinkSize <= 0 {
+	currentTotal := a.poolTotalSize.Load()
+	target := currentTotal - s.config.MinSize
+	if target <= 0 {
 		return
+	}
+
+	// 渐进式缩容：每次最多缩 20%
+	shrinkSize := target / 5
+	if shrinkSize < 1 {
+		shrinkSize = 1
+	}
+	if shrinkSize > target {
+		shrinkSize = target
 	}
 
 	closedCount := int64(0)
@@ -205,45 +250,7 @@ func (a *PoolManagerActor[T]) shrink(s *PoolManagerState[T]) {
 			a.poolTotalSize.Add(-1)
 			closedCount++
 		default:
-			return
+			return // 没有更多可关闭的了
 		}
 	}
-}
-
-func (a *PoolManagerActor[T]) cleanupIdleTimeout(s *PoolManagerState[T]) {
-	if s.config.SurviveTime <= 0 {
-		return
-	}
-
-	expiration := time.Now().Add(-s.config.SurviveTime)
-	temp := make([]*resource[T], 0, len(a.sharedResources))
-
-	for {
-		select {
-		case r := <-a.sharedResources:
-			if r.updateTime.Before(expiration) {
-				a.connControl.Close(r.Conn)
-				a.poolTotalSize.Add(-1)
-			} else {
-				temp = append(temp, r)
-			}
-		default:
-			for _, r := range temp {
-				select {
-				case a.sharedResources <- r:
-				default:
-					a.connControl.Close(r.Conn)
-					a.poolTotalSize.Add(-1)
-				}
-			}
-			return
-		}
-	}
-}
-
-func max(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
 }

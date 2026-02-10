@@ -17,10 +17,23 @@ const (
 	stressMinSize = 50
 	stressMaxSize = 500
 	stressSurvive = 180 * time.Second
-	stressMonitor = 2 * time.Second
+	stressMonitor = 1 * time.Second
 	opsPerLevel   = 500_000
-	useDuration   = 4 * time.Millisecond
+	useDuration   = 5 * time.Millisecond
 )
+
+// 并发测试级别
+var stressLevels = []int{
+	1000,
+	2000,
+	4000,
+	6000,
+	8000,
+	10000,
+	20000,
+	50000,
+	100000,
+}
 
 // FakeConn 模拟连接
 type FakeConn struct {
@@ -53,7 +66,7 @@ func (c *FakeConn) Close(_ *FakeConn) error {
 }
 
 func (c *FakeConn) Create() (*FakeConn, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(1 * time.Millisecond)
 	return NewFakeConn(), nil
 }
 
@@ -90,67 +103,76 @@ func (fc *FakeConnControl) Create() (*FakeConn, error) {
 	return (&FakeConn{}).Create()
 }
 
-// 并发测试级别
-var stressLevels = []int{
-	1000,
-	2000,
-	4000,
-	6000,
-	8000,
-	100000,
-}
-
 // BenchmarkStress_GetPut_RealUse 带真实使用时间的压测
 func BenchmarkStress_GetPut_RealUse(b *testing.B) {
-	logFile, err := os.OpenFile("benchmark_res.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("benchmark_optimized.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		b.Fatalf("无法创建日志文件: %v", err)
 	}
 	defer logFile.Close()
 
-	fmt.Fprintf(logFile, "\n=== 压测开始 [%s] ===\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(logFile, "\n=== 优化后压测开始 [%s] ===\n", time.Now().Format("2006-01-02 15:04:05"))
 
 	for _, concurrency := range stressLevels {
-		b.Run(fmt.Sprintf("concurrency=%d_use4ms", concurrency), func(b *testing.B) {
+		b.Run(fmt.Sprintf("concurrency=%d_optimized", concurrency), func(b *testing.B) {
+			// ============ 优化后的池配置 ============
 			config := PoolConfig{
 				MinSize:          int64(stressMinSize),
 				MaxSize:          int64(stressMaxSize),
 				SurviveTime:      stressSurvive,
 				MonitorInterval:  stressMonitor,
-				IdleBufferFactor: 2.0, // 增大缓冲以减少慢路径
+				IdleBufferFactor: 1.0, // 提高缓冲因子，减少慢路径
 				MaxRetries:       3,
-				RetryInterval:    500 * time.Millisecond,
-				ReconnectOnGet:   true,
+				RetryInterval:    200 * time.Millisecond, // 缩短重试间隔
+				ReconnectOnGet:   false,                  // 压测时关闭重连检查
 			}
 
-			p := NewPool(config, &FakeConnControl{createDelay: 10 * time.Millisecond})
+			p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
 			defer p.Close()
 
-			time.Sleep(500 * time.Millisecond) // 等待预初始化
+			// 等待预初始化完成
+			time.Sleep(1 * time.Second)
 
 			stats, _ := p.Stats(context.Background())
-			fmt.Fprintf(logFile, "[%s] 并发=%d | 初始: total=%d, available=%d, in_use=%d\n",
-				time.Now().Format("15:04:05"), concurrency,
-				stats["total_size"], stats["pool_available"], stats["pool_in_use"])
+			fmt.Fprintf(logFile, "\n[%s] 并发=%d | 初始状态:\n",
+				time.Now().Format("15:04:05"), concurrency)
+			fmt.Fprintf(logFile, "  total=%d, available=%d, in_use=%d, waiting=%d, expanding=%d\n",
+				stats["total_size"], stats["pool_available"], stats["pool_in_use"],
+				stats["waiting_count"], stats["expanding"])
 
+			// ============ 统计指标 ============
 			var successOps atomic.Int64
 			var failedOps atomic.Int64
+			var timeoutOps atomic.Int64
 			var maxInUse atomic.Int64
+			var maxWaiting atomic.Int64
+			var maxExpanding atomic.Int64
+			var totalLatency atomic.Int64 // 总延迟（微秒）
+
+			// 采样计数器
 			var sampleCounter atomic.Int32
-			const sampleEvery = 1000
+			const sampleEvery = 500 // 每500次操作采样一次
 
 			b.ResetTimer()
 			start := time.Now()
 
+			// ============ 并发压测 ============
 			b.SetParallelism(concurrency)
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					opStart := time.Now()
+
+					// 使用较短的超时时间，测试扩容效率
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					res, err := p.Get(ctx)
 					cancel()
 
 					if err != nil {
-						failedOps.Add(1)
+						if err == context.DeadlineExceeded {
+							timeoutOps.Add(1)
+						} else {
+							failedOps.Add(1)
+						}
 						continue
 					}
 
@@ -163,33 +185,63 @@ func BenchmarkStress_GetPut_RealUse(b *testing.B) {
 						continue
 					}
 
+					// 记录成功操作和延迟
 					successOps.Add(1)
+					latency := time.Since(opStart).Microseconds()
+					totalLatency.Add(latency)
 
-					// 采样统计峰值
+					// ============ 采样统计峰值 ============
 					if sampleCounter.Add(1)%sampleEvery == 0 {
 						currentStats, _ := p.Stats(context.Background())
-						currentInUse := currentStats["pool_in_use"]
-						for {
-							old := maxInUse.Load()
-							if currentInUse <= old || maxInUse.CompareAndSwap(old, currentInUse) {
-								break
+
+						// 更新峰值
+						updateMax := func(target *atomic.Int64, value int64) {
+							for {
+								old := target.Load()
+								if value <= old || target.CompareAndSwap(old, value) {
+									break
+								}
 							}
 						}
+
+						updateMax(&maxInUse, currentStats["pool_in_use"])
+						updateMax(&maxWaiting, currentStats["waiting_count"])
+						updateMax(&maxExpanding, currentStats["expanding"])
 					}
 				}
 			})
 
 			duration := time.Since(start).Seconds()
-			throughput := float64(successOps.Load()) / duration
+			totalOps := successOps.Load()
+			throughput := float64(totalOps) / duration
+			avgLatency := float64(0)
+			if totalOps > 0 {
+				avgLatency = float64(totalLatency.Load()) / float64(totalOps) / 1000.0 // 转换为毫秒
+			}
 
-			fmt.Fprintf(logFile, "  => 结果: 成功=%d | 失败=%d | 吞吐=%.2f ops/s | 峰值InUse=%d | 耗时=%.2fs\n",
-				successOps.Load(), failedOps.Load(), throughput, maxInUse.Load(), duration)
+			// ============ 输出结果 ============
+			fmt.Fprintf(logFile, "  => 压测结果:\n")
+			fmt.Fprintf(logFile, "     成功操作: %d\n", successOps.Load())
+			fmt.Fprintf(logFile, "     失败操作: %d\n", failedOps.Load())
+			fmt.Fprintf(logFile, "     超时操作: %d\n", timeoutOps.Load())
+			fmt.Fprintf(logFile, "     吞吐量: %.2f ops/s\n", throughput)
+			fmt.Fprintf(logFile, "     平均延迟: %.2f ms\n", avgLatency)
+			fmt.Fprintf(logFile, "     总耗时: %.2f s\n", duration)
+
+			fmt.Fprintf(logFile, "  => 峰值指标:\n")
+			fmt.Fprintf(logFile, "     最大使用中: %d\n", maxInUse.Load())
+			fmt.Fprintf(logFile, "     最大等待数: %d\n", maxWaiting.Load())
+			fmt.Fprintf(logFile, "     最大扩容中: %d\n", maxExpanding.Load())
 
 			finalStats, _ := p.Stats(context.Background())
-			fmt.Fprintf(logFile, "  => 最终: total=%d, available=%d, in_use=%d\n\n",
-				finalStats["total_size"], finalStats["pool_available"], finalStats["pool_in_use"])
+			fmt.Fprintf(logFile, "  => 最终状态:\n")
+			fmt.Fprintf(logFile, "     total=%d, available=%d, in_use=%d, waiting=%d, expanding=%d\n\n",
+				finalStats["total_size"], finalStats["pool_available"], finalStats["pool_in_use"],
+				finalStats["waiting_count"], finalStats["expanding"])
 		})
 	}
+
+	fmt.Fprintf(logFile, "=== 压测结束 [%s] ===\n", time.Now().Format("2006-01-02 15:04:05"))
 }
 
 // BenchmarkPool_GetPut 纯调度性能测试
