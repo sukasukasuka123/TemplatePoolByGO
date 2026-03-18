@@ -121,7 +121,7 @@ func BenchmarkStress_GetPut_RealUse(b *testing.B) {
 				MaxSize:          int64(stressMaxSize),
 				SurviveTime:      stressSurvive,
 				MonitorInterval:  stressMonitor,
-				IdleBufferFactor: 0.6, // 从1变成0.6
+				IdleBufferFactor: 0.6,
 				MaxRetries:       3,
 				RetryInterval:    200 * time.Millisecond, // 缩短重试间隔
 				ReconnectOnGet:   false,                  // 压测时关闭重连检查
@@ -281,7 +281,7 @@ func BenchmarkStress_GetPut(b *testing.B) {
 				MaxSize:          int64(stressMaxSize),
 				SurviveTime:      stressSurvive,
 				MonitorInterval:  stressMonitor,
-				IdleBufferFactor: 1.5,
+				IdleBufferFactor: 0.6,
 				MaxRetries:       2,
 				RetryInterval:    200 * time.Millisecond,
 				ReconnectOnGet:   false,
@@ -297,7 +297,8 @@ func BenchmarkStress_GetPut(b *testing.B) {
 				stats["total_size"], stats["pool_available"], stats["pool_in_use"])
 
 			var successOps atomic.Int64
-			var failedOps atomic.Int64
+			var failedGetOps atomic.Int64
+			var failedPutOps atomic.Int64
 			var maxInUse atomic.Int64
 
 			b.ResetTimer()
@@ -309,15 +310,14 @@ func BenchmarkStress_GetPut(b *testing.B) {
 					ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 					res, err := p.Get(ctx)
 					cancel()
-
 					if err != nil {
-						failedOps.Add(1)
+						failedGetOps.Add(1)
 						continue
 					}
 
 					err = p.Put(res)
 					if err != nil {
-						failedOps.Add(1)
+						failedPutOps.Add(1)
 						continue
 					}
 
@@ -338,8 +338,8 @@ func BenchmarkStress_GetPut(b *testing.B) {
 			duration := time.Since(start).Seconds()
 			throughput := float64(successOps.Load()) / duration
 
-			b.Logf("并发=%d | 成功=%d | 失败=%d | 吞吐=%.2f ops/s | 峰值InUse=%d | 耗时=%.2fs",
-				concurrency, successOps.Load(), failedOps.Load(),
+			b.Logf("并发=%d | 成功=%d | 失败=%d(Get)、%d (Put)| 吞吐=%.2f ops/s | 峰值InUse=%d | 耗时=%.2fs",
+				concurrency, successOps.Load(), failedGetOps.Load(), failedPutOps.Load(),
 				throughput, maxInUse.Load(), duration)
 
 			finalStats, _ := p.Stats(context.Background())
@@ -393,7 +393,7 @@ func TestDynamicScaling(t *testing.T) {
 		MinSize:          5,
 		MaxSize:          50,
 		MonitorInterval:  500 * time.Millisecond,
-		IdleBufferFactor: 2.0,
+		IdleBufferFactor: 0.6,
 		MaxRetries:       2,
 		RetryInterval:    100 * time.Millisecond,
 		ReconnectOnGet:   false,
@@ -413,7 +413,9 @@ func TestDynamicScaling(t *testing.T) {
 	resources := make([]*Resource[*FakeConn], 0, 30)
 
 	for i := 0; i < 30; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		res, err := p.Get(ctx)
+		cancel()
 		if err != nil {
 			t.Logf("Get #%d failed: %v", i, err)
 			continue

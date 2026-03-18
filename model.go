@@ -134,8 +134,10 @@ func (p *Pool[T]) Put(res *resource[T]) error {
 
 	cc := p.manager.GetActor().connControl
 	if err := cc.Reset(res.Conn); err != nil {
-		p.manager.GetActor().connControl.Close(res.Conn)
-		p.totalSize.Add(-1)
+		_ = p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
+			a.connControl.Close(res.Conn)
+			a.poolTotalSize.Add(-1)
+		})
 		p.inUse.Add(-1)
 		return err
 	}

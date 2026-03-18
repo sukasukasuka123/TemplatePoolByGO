@@ -170,8 +170,6 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 		return
 	}
 
-	sem := make(chan struct{}, 500)
-
 	for i := int64(0); i < expandSize; i++ {
 		newExpanding := a.expanding.Add(1)
 		newTotal := a.poolTotalSize.Load() + newExpanding
@@ -181,16 +179,10 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 			break
 		}
 
-		sem <- struct{}{}
 		go func(idx int64) {
-			defer func() {
-				<-sem
-				a.expanding.Add(-1)
-			}()
 
 			var conn T
 			var err error
-
 			for retry := 0; retry < 3; retry++ {
 				conn, err = a.connControl.Create()
 				if err == nil {
@@ -198,32 +190,30 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-
 			if err != nil {
+				a.expanding.Add(-1)
 				return
 			}
 
-			a.poolTotalSize.Add(1)
-
-			res := &resource[T]{
-				ID:         fmt.Sprintf("exp-%d-%d", time.Now().UnixNano(), idx),
-				createTime: time.Now(),
-				updateTime: time.Now(),
-				Conn:       conn,
-			}
-
-			// 资源直达
-			if a.waitQueue.TryDequeue(res) {
-				return
-			}
-
-			// 放回池子（这里可能会因为 buffer 满而失败，但没关系）
-			select {
-			case a.sharedResources <- res:
-			default:
-				a.connControl.Close(conn)
-				a.poolTotalSize.Add(-1)
-			}
+			_ = a.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
+				a.expanding.Add(-1)
+				a.poolTotalSize.Add(1)
+				res := &resource[T]{
+					ID:         fmt.Sprintf("exp-%d-%d", time.Now().UnixNano(), idx),
+					createTime: time.Now(),
+					updateTime: time.Now(),
+					Conn:       conn,
+				}
+				if a.waitQueue.TryDequeue(res) {
+					return
+				}
+				select {
+				case a.sharedResources <- res:
+				default:
+					a.connControl.Close(conn)
+					a.poolTotalSize.Add(-1)
+				}
+			})
 		}(i)
 	}
 }

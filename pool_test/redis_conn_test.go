@@ -87,7 +87,7 @@ func BenchmarkRedis_Stress(b *testing.B) {
 				MaxSize:          int64(stressMaxSize),
 				SurviveTime:      stressSurvive,
 				MonitorInterval:  stressMonitor,
-				IdleBufferFactor: 3.0, // Redis 压测需要更大缓冲
+				IdleBufferFactor: 0.3, // Redis 压测需要更大缓冲
 				MaxRetries:       3,
 				RetryInterval:    500 * time.Millisecond,
 				ReconnectOnGet:   true, // 开启自动重连
