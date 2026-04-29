@@ -21,6 +21,9 @@ type PoolConfig struct {
 	MonitorInterval  time.Duration
 	IdleBufferFactor float64 // channel 缓冲系数
 
+	// 等待队列配置
+	MaxWaitQueue int64 // 新增，建议默认值 10000
+
 	// 重连配置
 	MaxRetries     int           // 最大重试次数
 	RetryInterval  time.Duration // 重试间隔
@@ -41,6 +44,9 @@ func DefaultPoolConfig() PoolConfig {
 		MaxRetries:       3,
 		RetryInterval:    1 * time.Second,
 		ReconnectOnGet:   true,
+		PingInterval:     30 * time.Second,
+		OnUnhealthy:      nil,
+		MaxWaitQueue:     10000,
 	}
 }
 

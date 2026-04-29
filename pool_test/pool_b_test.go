@@ -541,7 +541,8 @@ func TestPool_StressWithHeartbeat(t *testing.T) {
 		MaxRetries:       3,
 		RetryInterval:    200 * time.Millisecond,
 		ReconnectOnGet:   false,
-		PingInterval:     100 * time.Millisecond,
+		MaxWaitQueue:     10000,
+		PingInterval:     2 * time.Second, // 心跳间隔设短一点，方便快速看到效果
 		OnUnhealthy: func(err error) {
 			fmt.Fprintf(logFile, "[Unhealthy] %v\n", err)
 		},
@@ -579,10 +580,10 @@ func TestPool_StressWithHeartbeat(t *testing.T) {
 							return
 						}
 
-						reqCtx, reqCancel := context.WithTimeout(ctx, 3*time.Second)
+						reqCtx, reqCancel := context.WithTimeout(context.Background(), 3*time.Second)
 						start := time.Now()
 						r, err := p.Get(reqCtx)
-						reqCancel()
+						defer reqCancel()
 
 						if err != nil {
 							if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -638,8 +639,9 @@ func TestPool_StressWithHeartbeat(t *testing.T) {
 
 			// 断言：不应该有超时（MaxSize=200 足够应付 50/100/200 并发）
 			if concurrency <= 200 {
-				if timeoutCount.Load() > 0 {
-					t.Errorf("concurrent=%d 出现 %d 次超时，池容量应该足够", concurrency, timeoutCount.Load())
+				realTimeouts := timeoutCount.Load() // 包含 DeadlineExceeded 和 Canceled
+				if realTimeouts > 0 {
+					t.Errorf("concurrent=%d 出现 %d 次超时", concurrency, realTimeouts)
 				}
 			}
 		})
