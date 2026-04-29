@@ -1,4 +1,3 @@
-// ===== example code for our pool implementation =====
 package pool_test
 
 import (
