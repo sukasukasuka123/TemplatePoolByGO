@@ -25,6 +25,10 @@ type PoolConfig struct {
 	MaxRetries     int           // 最大重试次数
 	RetryInterval  time.Duration // 重试间隔
 	ReconnectOnGet bool          // Get 时是否自动重连失效资源
+
+	// 心跳配置
+	PingInterval time.Duration   // 定期 Ping 连接的间隔
+	OnUnhealthy  func(err error) // 回调钩子
 }
 
 func DefaultPoolConfig() PoolConfig {

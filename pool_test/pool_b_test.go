@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -125,6 +126,11 @@ func BenchmarkStress_GetPut_RealUse(b *testing.B) {
 				MaxRetries:       3,
 				RetryInterval:    200 * time.Millisecond, // 缩短重试间隔
 				ReconnectOnGet:   false,                  // 压测时关闭重连检查
+				PingInterval:     1,                      // 压测时关闭自动 Ping
+				OnUnhealthy: func(err error) {
+					// 可选：记录不健康事件
+					fmt.Fprintf(logFile, "  [Unhealthy] %v\n", err)
+				},
 			}
 
 			p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
@@ -275,6 +281,7 @@ func BenchmarkPool_GetPut(b *testing.B) {
 // BenchmarkStress_GetPut 无 sleep 高并发压测
 func BenchmarkStress_GetPut(b *testing.B) {
 	for _, concurrency := range stressLevels {
+		var UnhealthyCount atomic.Int64
 		b.Run(fmt.Sprintf("concurrency=%d", concurrency), func(b *testing.B) {
 			config := PoolConfig{
 				MinSize:          int64(stressMinSize),
@@ -285,6 +292,13 @@ func BenchmarkStress_GetPut(b *testing.B) {
 				MaxRetries:       2,
 				RetryInterval:    200 * time.Millisecond,
 				ReconnectOnGet:   false,
+				PingInterval:     100 * time.Microsecond,
+				OnUnhealthy: func(err error) {
+					// 1. 记录日志
+					b.Logf("[CALLBACK TRIGGERED] OnUnhealthy called with error: %v at %v\n", err, time.Now().Format(time.RFC3339Nano))
+					// 2. 增加计数
+					UnhealthyCount.Add(1)
+				},
 			}
 
 			p := NewPool(config, &FakeConnControl{})
@@ -437,4 +451,323 @@ func TestDynamicScaling(t *testing.T) {
 	stats, _ = p.Stats(ctx)
 	t.Logf("释放后: total=%d, available=%d, in_use=%d",
 		stats["total_size"], stats["pool_available"], stats["pool_in_use"])
+}
+
+func BenchmarkPool_WithHeartbeat(b *testing.B) {
+	logFile, _ := os.OpenFile("benchmark_heartbeat.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	defer logFile.Close() // 补上
+
+	// MaxSize 夹在并发梯度中间，让不同并发级别测到不同路径
+	config := PoolConfig{
+		MinSize:          20,
+		MaxSize:          200, // 明确写死，不用全局变量
+		IdleBufferFactor: 0.6,
+		SurviveTime:      30 * time.Second,
+		MonitorInterval:  5 * time.Second,
+		MaxRetries:       3,
+		RetryInterval:    200 * time.Millisecond,
+		ReconnectOnGet:   false,
+		PingInterval:     5 * time.Second, // 心跳间隔要比压测时间短，才能观察到效果
+		OnUnhealthy: func(err error) {
+			fmt.Fprintf(logFile, "[Unhealthy] %v\n", err)
+		},
+	}
+
+	const useDuration = 10 * time.Millisecond
+
+	for _, concurrency := range []int{50, 100, 200, 500} {
+		concurrency := concurrency
+		b.Run(fmt.Sprintf("concurrent-%d", concurrency), func(b *testing.B) {
+			p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
+			defer p.Close()
+			time.Sleep(500 * time.Millisecond)
+
+			var timeoutCount, errorCount atomic.Int64
+
+			b.ResetTimer()
+
+			// 启动固定数量的 worker，每个 worker 跑 b.N/concurrency 次
+			// 这样才是真正的持续并发压力
+			var wg sync.WaitGroup
+			opsPerWorker := b.N/concurrency + 1
+
+			for w := 0; w < concurrency; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for i := 0; i < opsPerWorker; i++ {
+						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+						r, err := p.Get(ctx)
+						cancel()
+						if err != nil {
+							if errors.Is(err, context.DeadlineExceeded) {
+								timeoutCount.Add(1)
+							} else {
+								errorCount.Add(1)
+							}
+							continue
+						}
+						time.Sleep(useDuration)
+						p.Put(r)
+					}
+				}()
+			}
+			wg.Wait()
+
+			// 输出到日志，而不是丢弃
+			finalStats, _ := p.Stats(context.Background())
+			fmt.Fprintf(logFile, "[concurrent=%d] timeouts=%d errors=%d final_total=%d available=%d\n",
+				concurrency,
+				timeoutCount.Load(), errorCount.Load(),
+				finalStats["total_size"], finalStats["pool_available"])
+		})
+	}
+}
+
+func TestPool_StressWithHeartbeat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过压力测试")
+	}
+
+	logFile, _ := os.OpenFile("stress_heartbeat.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	defer logFile.Close()
+
+	config := PoolConfig{
+		MinSize:          20,
+		MaxSize:          200,
+		IdleBufferFactor: 0.6,
+		SurviveTime:      30 * time.Second,
+		MonitorInterval:  500 * time.Millisecond, // 压测时调短，能看到扩容行为
+		MaxRetries:       3,
+		RetryInterval:    200 * time.Millisecond,
+		ReconnectOnGet:   false,
+		PingInterval:     100 * time.Millisecond,
+		OnUnhealthy: func(err error) {
+			fmt.Fprintf(logFile, "[Unhealthy] %v\n", err)
+		},
+	}
+
+	const (
+		useDuration  = 10 * time.Millisecond
+		testDuration = 15 * time.Second // 每个并发级别跑 15s，让扩容/心跳都能触发
+	)
+
+	for _, concurrency := range []int{50, 100, 200, 500} {
+		concurrency := concurrency
+		t.Run(fmt.Sprintf("concurrent-%d", concurrency), func(t *testing.T) {
+			p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
+			defer p.Close()
+			time.Sleep(500 * time.Millisecond) // 等预热
+
+			var (
+				successCount atomic.Int64
+				timeoutCount atomic.Int64
+				errorCount   atomic.Int64
+				totalLatency atomic.Int64
+			)
+
+			ctx, cancel := context.WithTimeout(context.Background(), testDuration)
+			defer cancel()
+
+			var wg sync.WaitGroup
+			for w := 0; w < concurrency; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						if ctx.Err() != nil {
+							return
+						}
+
+						reqCtx, reqCancel := context.WithTimeout(ctx, 3*time.Second)
+						start := time.Now()
+						r, err := p.Get(reqCtx)
+						reqCancel()
+
+						if err != nil {
+							if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+								timeoutCount.Add(1)
+							} else {
+								errorCount.Add(1)
+							}
+							continue
+						}
+
+						time.Sleep(useDuration)
+						p.Put(r)
+
+						successCount.Add(1)
+						totalLatency.Add(time.Since(start).Microseconds())
+					}
+				}()
+			}
+
+			// 每秒采样一次，记录池的实时状态
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						stats, _ := p.Stats(context.Background())
+						fmt.Fprintf(logFile, "[concurrent=%d] total=%d available=%d in_use=%d waiting=%d\n",
+							concurrency,
+							stats["total_size"], stats["pool_available"],
+							stats["pool_in_use"], stats["waiting_count"])
+					}
+				}
+			}()
+
+			wg.Wait()
+
+			// 汇总
+			total := successCount.Load()
+			avgLatency := float64(0)
+			if total > 0 {
+				avgLatency = float64(totalLatency.Load()) / float64(total) / 1000.0
+			}
+			throughput := float64(total) / testDuration.Seconds()
+
+			finalStats, _ := p.Stats(context.Background())
+			fmt.Fprintf(logFile,
+				"\n[concurrent=%d] SUMMARY: success=%d timeouts=%d errors=%d throughput=%.0f ops/s avg_latency=%.2f ms final_total=%d\n\n",
+				concurrency, total, timeoutCount.Load(), errorCount.Load(),
+				throughput, avgLatency, finalStats["total_size"])
+
+			// 断言：不应该有超时（MaxSize=200 足够应付 50/100/200 并发）
+			if concurrency <= 200 {
+				if timeoutCount.Load() > 0 {
+					t.Errorf("concurrent=%d 出现 %d 次超时，池容量应该足够", concurrency, timeoutCount.Load())
+				}
+			}
+		})
+	}
+}
+
+// 需要改动ping的返回值
+func TestPool_WithHeartbeatFail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过压力测试")
+	}
+
+	// 准备日志文件
+	logFile, err := os.OpenFile("stress_heartbeat.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		t.Fatalf("Failed to open log file: %v", err)
+	}
+	defer logFile.Close()
+
+	// 用于统计 OnUnhealthy 被调用的次数
+	var unhealthyCount atomic.Int64
+
+	config := PoolConfig{
+		MinSize:          20,
+		MaxSize:          200,
+		IdleBufferFactor: 0.6,
+		SurviveTime:      30 * time.Second,
+		MonitorInterval:  500 * time.Millisecond,
+		MaxRetries:       3,
+		RetryInterval:    200 * time.Millisecond,
+		ReconnectOnGet:   false,
+		PingInterval:     100 * time.Millisecond, // 心跳间隔设短一点，方便快速看到效果
+		OnUnhealthy: func(err error) {
+			// 1. 记录日志
+			fmt.Fprintf(logFile, "[CALLBACK TRIGGERED] OnUnhealthy called with error: %v at %v\n", err, time.Now().Format(time.RFC3339Nano))
+			// 2. 增加计数
+			unhealthyCount.Add(1)
+		},
+	}
+
+	const (
+		useDuration  = 10 * time.Millisecond
+		testDuration = 15 * time.Second
+	)
+
+	// 我们只测试 concurrent=50 的情况来验证心跳回调，因为高并发下日志会非常乱
+	// 如果你想保留所有并发测试，可以把下面的循环解开注释
+	concurrencies := []int{50}
+	// concurrencies := []int{50, 100, 200, 500}
+
+	for _, concurrency := range concurrencies {
+		t.Run(fmt.Sprintf("concurrent-%d-HeartbeatCheck", concurrency), func(t *testing.T) {
+
+			// 创建控制器，并开启 Ping 失败模拟
+			fakeCtrl := &FakeConnControl{
+				createDelay: 1 * time.Millisecond,
+			}
+
+			p := NewPool(config, fakeCtrl)
+			defer p.Close()
+
+			// 等待预热
+			time.Sleep(500 * time.Millisecond)
+
+			// 启动业务压力协程 (模拟正常业务请求)
+			ctx, cancel := context.WithTimeout(context.Background(), testDuration)
+			defer cancel()
+
+			var wg sync.WaitGroup
+			var successCount atomic.Int64
+
+			for w := 0; w < concurrency; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						if ctx.Err() != nil {
+							return
+						}
+						reqCtx, reqCancel := context.WithTimeout(ctx, 3*time.Second)
+						r, err := p.Get(reqCtx)
+						reqCancel()
+
+						if err != nil {
+							continue
+						}
+						time.Sleep(useDuration)
+						p.Put(r)
+						successCount.Add(1)
+					}
+				}()
+			}
+
+			// 启动状态监控协程
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						stats, _ := p.Stats(context.Background())
+						fmt.Fprintf(logFile, "[STATS] concurrent=%d total=%d available=%d in_use=%d waiting=%d expanding=%d\n",
+							concurrency,
+							stats["total_size"], stats["pool_available"],
+							stats["pool_in_use"], stats["waiting_count"], stats["expanding"])
+					}
+				}
+			}()
+
+			// 等待测试结束
+			wg.Wait()
+
+			// === 验证部分 ===
+
+			// 1. 检查 OnUnhealthy 是否被调用
+			count := unhealthyCount.Load()
+			fmt.Fprintf(logFile, "\n[RESULT] OnUnhealthy callback triggered %d times.\n", count)
+
+			if count == 0 {
+				t.Errorf("Expected OnUnhealthy callback to be triggered at least once when Ping fails, but it was never called.")
+			} else {
+				t.Logf("Success! OnUnhealthy callback was triggered %d times.", count)
+			}
+
+			// 2. 检查日志文件中是否有具体的错误记录
+			// (这一步主要靠人工查看 stress_heartbeat.log，或者你可以读取文件内容断言)
+		})
+	}
 }

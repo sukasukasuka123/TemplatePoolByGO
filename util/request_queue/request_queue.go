@@ -10,7 +10,8 @@ import (
 type LockFreeWaiter[T any] struct {
 	Ch        chan T
 	next      unsafe.Pointer
-	cancelled atomic.Bool
+	Cancelled atomic.Bool
+	delivered atomic.Bool // 新增：资源已投递，Ch 可能还没被读
 }
 
 type LockFreeQueue[T any] struct {
@@ -36,7 +37,7 @@ func (q *LockFreeQueue[T]) Enqueue() *LockFreeWaiter[T] {
 	w := &LockFreeWaiter[T]{
 		Ch: q.chanPool.Get().(chan T),
 	}
-	w.cancelled.Store(false)
+	w.Cancelled.Store(false)
 
 	for {
 		tail := (*LockFreeWaiter[T])(atomic.LoadPointer(&q.tail))
@@ -90,7 +91,7 @@ func (q *LockFreeQueue[T]) TryDequeue(resource T) bool {
 		}
 
 		// ============ 处理已取消的节点（延迟删除）============
-		if next.cancelled.Load() {
+		if next.Cancelled.Load() {
 			if atomic.CompareAndSwapPointer(&q.head, unsafe.Pointer(head), unsafe.Pointer(next)) {
 				q.length.Add(-1)
 				q.recycle(next.Ch)
@@ -112,7 +113,7 @@ func (q *LockFreeQueue[T]) TryDequeue(resource T) bool {
 				// Channel 已满或关闭（理论上不应该发生）
 				// 回收 channel 并继续寻找下一个等待者
 				q.recycle(next.Ch)
-				continue
+				return false
 			}
 		}
 
@@ -142,7 +143,7 @@ func (q *LockFreeQueue[T]) recycle(ch chan T) {
 
 // Remove 标记节点为已取消（延迟删除）
 func (q *LockFreeQueue[T]) Remove(w *LockFreeWaiter[T]) {
-	if w != nil && w.cancelled.CompareAndSwap(false, true) {
+	if w != nil && w.Cancelled.CompareAndSwap(false, true) {
 		// 只标记为取消，物理删除由 TryDequeue 延迟完成
 		// 这样可以避免复杂的并发删除逻辑
 	}
