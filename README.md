@@ -4,270 +4,332 @@
 See the full English README here:  
 [README_EN.md](./README_EN.md)
 
+一个基于泛型的 Go 连接池，核心目标是**管理重资源**（gRPC stream、数据库连接、TCP 连接等）。
 
-## 一、项目简介
+设计上有三个核心取舍：用 Actor 把扩缩容决策从热路径里隔离出去；用无锁等待队列做等待者管理；用泛型把池子逻辑和连接类型彻底解耦。
 
-本项目是一款基于Go语言实现的高性能通用资源池（连接池），采用Actor模型实现资源的异步扩容/缩容管理，结合无锁队列作为等待队列提升并发性能，支持资源复用、自动健康检查、超时控制等核心能力，可适配各类连接型资源（如数据库连接、网络连接等）的池化管理。
+```bash
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.7
+```
 
-## 二、快速使用方式
+---
 
-### 1. 核心配置定义
+## 你当时为什么这么设计
 
-首先定义资源池的核心配置，控制池的大小、存活时间、重试策略等：
+### 问题一：扩容风暴
+
+常见池子在 `Get` 里直接判断要不要扩容：
 
 ```go
-import (
-    "context"
-    "time"
-    pool "github.com/sukasukasuka123/TemplatePoolByGO"
-)
+// 常见做法，有问题
+mu.Lock()
+if totalSize < maxSize {
+    go createNewConn()  // 突发流量时，很多 goroutine 同时触发
+}
+mu.Unlock()
+```
 
-// 定义资源池配置
-config := PoolConfig{
-    MinSize:          50,         // 池最小资源数
-    MaxSize:          500,        // 池最大资源数
-    SurviveTime:      180 * time.Second, // 空闲资源存活时间
-    MonitorInterval:  1 * time.Second,   // 监控检查间隔
-    IdleBufferFactor: 0.6,        // 空闲资源缓冲因子（控制预保留空闲资源比例），可以理解为稳定下来后池子的水位
-    MaxRetries:       3,          // 资源创建失败重试次数
-    RetryInterval:    200 * time.Millisecond, // 重试间隔
-    ReconnectOnGet:   false,      // 获取资源时是否自动重连检查
+突发流量打来时，几百个 goroutine 同时判断"需要扩容"，同时去 `Create`，瞬间打出几百个连接建立请求——这叫扩容风暴。
+
+**你的做法**：`Get` 里只发一个限流信号（CAS + 时间窗口），所有扩缩容决策串行跑在一个 Actor 的 eventLoop 里。
+
+```go
+// Get 里只做这件事
+if p.lastExpandNotify.CompareAndSwap(lastNotify, now) {
+    _ = p.manager.Send(func(...) { a.checkAndAdjust(s) })
+    // 信号丢进 actor inbox，决策只发生一次
 }
 ```
 
-### 2. 实现资源控制接口
+扩容逻辑天然无竞争，不需要任何锁。
 
-资源池依赖统一的资源控制接口（Reset/Close/Ping/Create）管理资源生命周期，以模拟连接为例：
+### 问题二：等待者管理
+
+连接不够时调用方需要排队等待。最简单的做法是让所有人阻塞在同一个 channel 上，但这样"先来先得"无法保证，而且取消等待（ctx 超时）很麻烦。
+
+**你的做法**：每个等待者有自己独立的 `chan T`，挂在一个无锁链表上。连接归还时直接点对点交付给队头等待者，跳过 `resources` channel。
 
 ```go
-// 自定义资源需实现的核心接口
-type ResourceControl[T any] interface {
-    Create() (T, error)       // 创建新资源
-    Reset(resource T) error   // 重置资源（复用前清理状态）
-    Close(resource T) error   // 关闭资源
-    Ping(resource T) error    // 健康检查（判断资源是否可用）
-}
-
-// 示例：基于FakeConn实现自定义资源控制
-fc := &FakeConnControl{
-    createDelay: 1 * time.Millisecond, // 模拟资源创建延迟
-    failRate:    0.05,                 // 模拟5%的创建失败率
+// Put 里
+if p.waitQueue.TryDequeue(res) {
+    // 连接直接送到等待者手里，不经过 resources channel
+    return nil
 }
 ```
 
-### 3. 创建并使用资源池
+等待者取消时只是标记节点为 `Cancelled`，下次 `TryDequeue` 路过时懒删除，不需要从链表里真正摘除。
+
+### 问题三：接入不同连接类型
+
+大多数池子写死了连接类型，或者用 `interface{}` + 类型断言。**你用泛型**：
 
 ```go
-// 创建资源池
-pool := NewPool(config, fc)
-defer pool.Close() // 程序退出时关闭池
+type Conn[T any] interface {
+    Create() (T, error)
+    Reset(T)  error
+    Close(T)  error
+    Ping(T)   error
+}
+```
 
-// 获取资源
-ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+池子的全部逻辑是类型安全的。换连接类型只需要换一个 `Conn[T]` 实现。
+
+---
+
+## 快速上手
+
+### 第一步：实现 `Conn[T]` 接口
+
+四个方法，对应连接的完整生命周期：
+
+| 方法 | 时机 | 说明 |
+|------|------|------|
+| `Create()` | 扩容时 | 建立一条新连接 |
+| `Reset(T)` | `Put` 时 | 归还前重置连接状态（清空缓冲区、重置事务等） |
+| `Close(T)` | 缩容 / 连接异常时 | 释放连接 |
+| `Ping(T)` | 心跳时 | 检查连接是否健康 |
+
+以 gRPC stream 为例（取自 microHub 项目）：
+
+```go
+type streamResource struct {
+    sp *StreamPool
+}
+
+func (r *streamResource) Create() (*SingleStream, error) {
+    stream, err := r.sp.client.DispatchStream(context.Background())
+    if err != nil {
+        return nil, err
+    }
+    return NewSingleStream(stream, r.sp.addr, nil), nil
+}
+
+func (r *streamResource) Reset(s *SingleStream) error {
+    if s.IsClosed() {
+        return fmt.Errorf("stream already closed")
+    }
+    return nil
+}
+
+func (r *streamResource) Close(s *SingleStream) error {
+    s.Close()
+    return nil
+}
+
+func (r *streamResource) Ping(s *SingleStream) error {
+    if s.IsClosed() {
+        return fmt.Errorf("stream closed")
+    }
+    // 也可以检查底层 gRPC conn 的状态
+    state := r.sp.Conn.GetState()
+    if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+        return fmt.Errorf("conn unhealthy: %s", state)
+    }
+    return nil
+}
+```
+
+### 第二步：配置并创建池子
+
+```go
+cfg := pool.PoolConfig{
+    MinSize:          5,      // 启动时预热 5 条连接，池子永远不缩到 5 以下
+    MaxSize:          100,    // 连接总数上限（含使用中 + 空闲）
+    IdleBufferFactor: 0.4,    // resources channel 容量 = MaxSize × 0.4 = 40
+                              // 注意：这只影响空闲槽位的内存占用，不影响 MaxSize
+
+    SurviveTime:     30 * time.Minute, // 连接最长存活时间
+    MonitorInterval: 10 * time.Second, // 缩容检查间隔
+    MaxWaitQueue:    10000,            // 等待队列上限，超过返回 ErrPoolBusy
+
+    // 心跳配置
+    PingInterval: 30 * time.Second,
+    OnUnhealthy: func(err error) {
+        // Ping 失败、连接被驱逐时触发
+        // 可以在这里接入服务发现的刷新逻辑
+        log.Printf("连接异常被驱逐: %v", err)
+    },
+
+    // 重连配置
+    MaxRetries:     3,            // Create 失败时的重试次数
+    RetryInterval:  time.Second,  // 重试间隔
+    ReconnectOnGet: true,         // Get 时 Reset 失败是否自动重连
+}
+
+p := pool.NewPool(cfg, &streamResource{sp: myStreamPool})
+defer p.Close()
+```
+
+### 第三步：使用
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
-res, err := pool.Get(ctx)
+
+res, err := p.Get(ctx)
 if err != nil {
-    panic(fmt.Sprintf("获取资源失败: %v", err))
+    // pool.ErrPoolBusy            — 等待队列满了，直接拒绝
+    // context.DeadlineExceeded    — 等待超时
+    // context.Canceled            — 调用方主动取消
+    // "pool closed"               — 池子已关闭
+    return err
 }
+defer p.Put(res)  // 用完一定要还，否则连接泄漏
 
-// 使用资源（模拟业务逻辑）
-time.Sleep(5 * time.Millisecond)
+// res.Conn 就是你的 *SingleStream（或其他 T 类型）
+task, err := res.Conn.Send(req)
+```
 
-// 归还资源
-if err := pool.Put(res); err != nil {
-    panic(fmt.Sprintf("归还资源失败: %v", err))
+---
+
+## 配置项说明
+
+### `IdleBufferFactor` 是什么
+
+这个字段容易误解，单独说清楚。
+
+```
+resources channel 的容量 = MaxSize × IdleBufferFactor
+
+MaxSize=100, IdleBufferFactor=0.4
+→ channel 容量 = 40
+→ 但 totalSize 仍然可以到 100（另外 60 个连接在使用中，不占 channel 槽位）
+```
+
+`IdleBufferFactor` 控制的是**空闲连接最多占多少内存**，不影响最大连接数。设为 `1.0` 表示所有连接都可以同时空闲（内存最大但最安全）；设为 `0.4` 表示预期大约 60% 的连接会在使用中。
+
+### `OnUnhealthy` 怎么接入服务发现
+
+```go
+OnUnhealthy: func(err error) {
+    // Ping 的实现里可以把失败原因编码进 error
+    if isConnLevelFailure(err) {
+        // gRPC 连接彻底断了 → 通知服务发现重新解析地址，重建整个 StreamPool
+        serviceDiscovery.TriggerRefresh(addr)
+    }
+    // stream 级别的失败不需要处理
+    // 池子的 checkAndAdjust 会自动补充新 stream
+},
+```
+
+回调跑在心跳 goroutine 里，**不要在里面做阻塞操作**，重的工作起一个 goroutine 或者发到 channel 里。
+
+---
+
+## 内部机制
+
+### 扩容：三阶段非线性曲线
+
+扩容步长根据当前使用率动态计算：
+
+```
+usageRate = (totalSize - MinSize) / (MaxSize - MinSize)
+
+< 20%  → 保守期：每轮 +15
+20~75% → 爆发期：每轮 +剩余空间/2
+> 75%  → 收敛期：每轮 +剩余空间/8
+
+压力补偿：step = max(曲线步长, 等待人数/3)
+         等待人数 > 100 时：step = max(曲线步长, 等待人数/2)
+
+单次扩容上限：MaxSize/3
+```
+
+触发条件：有人在排队 **且** `totalSize < MaxSize`，或者 resources channel 利用率低于 30%（说明大多数连接都在使用中）。
+
+### 缩容
+
+触发条件：channel 利用率 > 90%（空闲连接很多）**且** 没有等待者 **且** `totalSize > MinSize`。
+
+每轮最多缩掉超出 `MinSize` 部分的 20%，渐进式缩容避免抖动。
+
+### 心跳对业务的保护
+
+```go
+func (p *Pool[T]) doPingRound() {
+    if p.waitQueue.Len() > 0 {
+        return  // 有人在等连接，心跳直接跳过这轮
+    }
+    for i := 0; i < 5; i++ {
+        if p.waitQueue.Len() > 0 {
+            // 取出连接到一半，发现有新的等待者进来了
+            // 把已取出的全部放回去，让出连接
+            for _, r := range batch { p.resources <- r }
+            return
+        }
+        // ...
+    }
 }
 ```
 
-## 三、测试说明
+心跳永远不会和业务请求抢连接。
 
-### 1. 核心测试函数
+### 等待者的无锁队列
 
-项目提供多维度的基准测试（Benchmark）和功能测试，核心测试函数如下：
-
-| 测试函数 | 用途 | 核心特点 |
-|----------|------|----------|
-| `BenchmarkStress_GetPut_RealUse` | 带真实资源使用时间的高并发压测 | 模拟资源实际使用延迟（5ms）、多并发级别（1k~10w）、输出详细性能指标 |
-| `BenchmarkPool_GetPut` | 纯调度性能测试 | 无资源使用延迟，仅测试Get/Put的调度性能 |
-| `BenchmarkStress_GetPut` | 无Sleep高并发压测 | 极致并发场景，验证池的稳定性和吞吐量 |
-| `TestReconnect` | 重连机制测试 | 验证ReconnectOnGet开启时的资源健康检查和重连逻辑 |
-
-### 2. 测试数据指标含义
-
-压测过程中输出的核心统计指标及含义：
-
-| 指标名 | 含义 |
-|--------|------|
-| `total_size` | 资源池总资源数（已创建的所有资源） |
-| `pool_available` | 池内可用资源数（空闲、可立即分配） |
-| `pool_in_use` | 正在使用的资源数（已分配未归还） |
-| `waiting_count` | 等待获取资源的请求数（阻塞在队列中） |
-| `expanding` | 正在扩容的资源数（创建中但未完成） |
-| `successOps` | 成功完成Get+Put的操作数 |
-| `failedOps` | 失败操作数（资源创建失败、归还失败等） |
-| `timeoutOps` | 超时操作数（获取资源超时） |
-| `throughput` | 吞吐量（每秒完成的Get+Put操作数） |
-| `avgLatency` | 平均延迟（单次Get+Put操作的平均耗时，单位ms） |
-
-### 3. 测试配置说明
-
-压测中核心常量配置及作用：
-
-```go
-const (
-    stressMinSize = 50        // 池最小资源数
-    stressMaxSize = 500       // 池最大资源数
-    stressSurvive = 180 * time.Second // 空闲资源存活时间
-    stressMonitor = 1 * time.Second   // 监控检查间隔
-    opsPerLevel   = 500_000   // 每个并发级别执行的操作数
-    useDuration   = 5 * time.Millisecond // 模拟资源使用时间
-)
+```
+入队：Enqueue() 返回一个 *LockFreeWaiter，里面有一个 buffered chan T
+取消：Remove(waiter) 只标记 Cancelled=true，不做物理删除
+交付：TryDequeue(res) CAS 推进队头，跳过已取消的节点，把 res 发到队头的 chan 里
 ```
 
-## 四、核心工作原理
+队列是 Michael-Scott 无锁队列的变体，用哨兵节点统一头尾操作。
 
-### 1. 资源获取（Get）方法核心逻辑
+---
 
-`model.go`中的`Pool.Get`方法是资源获取的核心，采用“快速路径→慢路径→扩容检测→阻塞等待”四阶段设计：
-
-#### 阶段1：快速路径（无阻塞）
-
-优先尝试从空闲资源队列中获取资源，无阻塞：
+## 错误处理
 
 ```go
-select {
-case r := <-p.resources:
-    return p.validateAndReturn(r) // 校验资源可用性后返回
+res, err := p.Get(ctx)
+switch {
+case err == nil:
+    // 正常拿到连接
+
+case errors.Is(err, pool.ErrPoolBusy):
+    // 等待队列满了（waitQueue.Len() >= MaxWaitQueue）
+    // 说明系统已经过载，直接向上层返回 429 或降级
+
+case errors.Is(err, context.DeadlineExceeded):
+    // 在等待队列里等太久，ctx 超时
+    // 可以记录慢请求日志
+
+case errors.Is(err, context.Canceled):
+    // 调用方主动取消，通常不需要特殊处理
+
 default:
+    // "pool closed" 或其他异常
 }
 ```
 
-#### 阶段2：慢路径（轻量等待）
+---
 
-将请求加入等待队列后，再次尝试获取资源，同时监听上下文超时：
+## 监控
 
 ```go
-waiter := p.waitQueue.Enqueue() // 加入无锁等待队列
-select {
-case r := <-p.resources:
-    p.waitQueue.Remove(waiter) // 获取到资源，移出等待队列
-    return p.validateAndReturn(r)
-case <-ctx.Done():
-    p.waitQueue.Remove(waiter) // 上下文超时，移出队列并返回错误
-    return nil, ctx.Err()
-default:
-}
+stats, _ := p.Stats(context.Background())
 ```
 
-#### 阶段3：扩容检测（异步触发）
+| key | 含义 |
+|-----|------|
+| `total_size` | 当前管理的连接总数（使用中 + 空闲） |
+| `pool_available` | resources channel 里的空闲连接数 |
+| `pool_in_use` | 当前被取出使用的连接数 |
+| `waiting_count` | 正在等待的调用方数量 |
+| `expanding` | 正在建立中（还没加入池子）的连接数 |
+| `buffer_cap` | resources channel 的容量（= MaxSize × IdleBufferFactor） |
 
-判断距离上次扩容通知是否超过10ms，若超过则通过Actor模型异步触发扩容检查：
+`total_size = pool_available + pool_in_use + expanding`（近似，有极短的中间态）
 
-```go
-now := time.Now().UnixMilli()
-lastNotify := p.lastExpandNotify.Load()
-if now-lastNotify > 10 {
-    if p.lastExpandNotify.CompareAndSwap(lastNotify, now) {
-        _ = p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
-            a.checkAndAdjust(s) // 异步检查并调整池大小（扩容/缩容）
-        })
-    }
-}
-```
+高负载时重点关注 `waiting_count`：持续 > 0 说明池子跟不上请求速度，考虑调大 `MaxSize` 或检查连接建立耗时。
 
-#### 阶段4：阻塞等待
+---
 
-若上述步骤未获取到资源，则阻塞等待队列通知，同时监控超时和队列过载：
+## 适用场景
 
-```go
-select {
-case <-ctx.Done():
-    // 等待队列超过10000时返回池繁忙错误，避免过载
-    if p.waitQueue.Len() > 10000 {
-        return nil, ErrPoolBusy
-    }
-    p.waitQueue.Remove(waiter)
-    return nil, ctx.Err()
-case r, ok := <-waiter.Ch:
-    if !ok {
-        return nil, fmt.Errorf("pool closed")
-    }
-    return p.validateAndReturn(r) // 从等待队列获取到资源
-}
-```
+**适合**：gRPC stream、数据库连接、TCP 长连接——任何建立成本高、需要复用的重资源。
 
-### 2. 核心工具组件（util）
+**不适合**：byte buffer、临时对象这类极轻资源，用标准库的 `sync.Pool` 更合适（per-P 分片，GC 友好，开销更低）。
 
-#### （1）actorlite（已淘汰）
-
-早期的“叫号机”实现，用于请求排队调度，因性能和扩展性问题被替换为`request_queue`。
-
-#### （2）request_queue（无锁队列）
-
-现阶段的“叫号机”，作为等待队列的核心实现：
-
-- 无锁设计：基于CAS原子操作实现，避免高并发下的锁竞争；
-- 缓冲作用：承接获取资源的阻塞请求，降低池的瞬时压力；
-- 快速操作：支持Enqueue（入队）、Remove（移除）、Len（长度）等核心操作，O(1)时间复杂度。
-
-#### （3）closure（Actor模型基类）
-
-扩容/缩容调度的Actor模型基类，定义Actor的核心行为：
-
-- 封装状态：将池的管理状态（如资源数、扩容标记）与操作逻辑解耦；
-- 异步调度：通过消息发送机制（Send方法）执行扩容/缩容逻辑，避免并发冲突；
-- 示例接口：`CounterActor.Get`展示Actor如何安全访问/修改状态。
-
-### 3. 基于Actor的池资源管理（manager）
-
-`PoolManager`是资源池的核心管理模块，基于Actor模型实现异步、线程安全的资源扩容/缩容：
-
-#### 核心能力
-
-- 状态隔离：所有池的状态修改（如total_size、expanding）都在Actor的消息处理函数中执行，避免多goroutine竞争；
-- 扩容检查：`checkAndAdjust`方法根据当前等待数、可用资源数、最大池大小判断是否需要扩容；
-- 缩容逻辑：定期检查空闲资源的存活时间，清理超过SurviveTime的资源，释放内存；
-- 失败重试：资源创建失败时，根据MaxRetries和RetryInterval自动重试，降低创建失败率。
-
-#### 与Get方法的协同
-
-Get方法中触发的扩容通知（`a.checkAndAdjust(s)`）会发送消息到Manager的消息队列，Manager异步处理扩容请求：
-- 避免Get方法阻塞在扩容逻辑上，保证获取资源的响应速度；
-- 批量扩容：Manager可聚合短时间内的扩容请求，批量创建资源，减少频繁创建的开销；
-- 流量控制：扩容过程中标记`expanding`状态，避免过度扩容导致资源浪费。
-
-### 4. 资源归还（Put）方法（补充逻辑）
-
-虽然未提供完整Put方法代码，但结合Get逻辑可推导核心原理：
-- 资源校验：归还时检查资源是否可用（如未关闭、健康状态正常）；
-- 快速归还：将资源放回`p.resources`空闲队列，供后续Get请求快速获取；
-- 缩容触发：若空闲资源数超过阈值（IdleBufferFactor），触发缩容检查，清理多余空闲资源；
-- 队列唤醒：若有等待获取资源的请求，优先将归还的资源分配给等待请求，减少阻塞。
-
-## 五、测试结果分析（基于BenchmarkStress_GetPut_RealUse）
-
-### 1. 核心性能指标
-
-| 并发数 | 吞吐量（ops/s） | 平均延迟（ms） | 超时率 | 峰值等待数 | 峰值使用中资源数 |
-|--------|----------------|----------------|--------|------------|------------------|
-| 1000   | ~45000         | ~22            | 0%     | <100       | ~500             |
-| 10000  | ~180000        | ~55            | <0.5%  | <500       | ~500             |
-| 50000  | ~250000        | ~200           | <2%    | <2000      | ~500             |
-
-### 2. 关键结论
-
-1. 资源池在最大资源数（500）限制下，并发数超过10000后吞吐量增长放缓，核心瓶颈为资源创建速度（模拟1ms创建延迟）；
-2. 空闲缓冲因子从1.0调整为0.6后，峰值等待数降低约30%，平均延迟优化约15%；
-3. 重试间隔缩短至200ms后，资源创建失败导致的超时率从5%降至2%以内；
-4. 无锁队列（request_queue）在高并发下表现稳定，未出现队列阻塞或性能劣化。
-
-## 六、扩展与优化建议
-
-1. **资源预热**：启动时提前创建MinSize数量的资源，避免首次请求的创建延迟；
-2. **动态扩容阈值**：根据历史等待数动态调整扩容触发阈值，适配业务流量波动；
-3. **资源分级**：对核心业务分配高优先级资源，非核心业务使用低优先级资源，提升核心链路稳定性；
-4. **监控告警**：增加waiting_count、expanding、失败率等指标的监控，超过阈值时触发告警；
-5. **连接复用优化**：对Reset操作做轻量化处理，减少资源复用的开销。
+---
 
 ## License
 

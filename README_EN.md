@@ -1,197 +1,227 @@
-# TemplatePoolByGO — High-Performance Generic Resource Pool in Go
+# TemplatePoolByGO
 
-## 1. Overview
+A generic, production-ready connection pool for Go, built on a lock-free wait queue and an actor-based pool manager.
 
-**TemplatePoolByGO** is a high-performance, generic resource pool implemented in Go.
-It is designed around the **Actor model** to manage asynchronous resource **scaling up and down**, combined with a **lock-free waiting queue** to achieve excellent concurrency performance.
-
-The pool supports:
-
-* Resource reuse
-* Asynchronous auto-scaling (expand / shrink)
-* Health checking
-* Timeout control
-* Retry and failure handling
-
-It is suitable for pooling **any connection-like resources**, such as database connections, network connections, RPC clients, etc.
-
----
-
-## 2. Quick Start
-
-### 2.1 Core Pool Configuration
-
-First, define the core configuration of the pool to control capacity, lifetime, and retry strategies:
-
-```go
-import (
-    "context"
-    "time"
-    pool "github.com/sukasukasuka123/TemplatePoolByGO"
-)
-
-config := PoolConfig{
-    MinSize:          50,                     // Minimum number of resources
-    MaxSize:          500,                    // Maximum number of resources
-    SurviveTime:      180 * time.Second,      // Idle resource survival time
-    MonitorInterval:  1 * time.Second,        // Monitoring interval
-    IdleBufferFactor: 0.6,                    // Idle buffer factor (stable water level)
-    MaxRetries:       3,                      // Retry count for resource creation
-    RetryInterval:    200 * time.Millisecond, // Retry interval
-    ReconnectOnGet:   false,                  // Recheck health on Get
-}
+```
+go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.7
 ```
 
 ---
 
-### 2.2 Implement the Resource Control Interface
+## Features
 
-The pool relies on a unified **resource control interface** to manage the resource lifecycle:
-
-```go
-type ResourceControl[T any] interface {
-    Create() (T, error)       // Create a new resource
-    Reset(resource T) error   // Reset resource before reuse
-    Close(resource T) error   // Close resource
-    Ping(resource T) error    // Health check
-}
-```
-
-Example implementation using a simulated connection:
-
-```go
-fc := &FakeConnControl{
-    createDelay: 1 * time.Millisecond, // Simulated creation delay
-    failRate:    0.05,                 // Simulated failure rate (5%)
-}
-```
+- **Generic** — `Pool[T any]` works with any connection type: gRPC streams, SQL connections, HTTP clients, or anything you wrap.
+- **Lock-free wait queue** — waiters queue without mutex contention; CAS-based dequeue with lazy deletion of cancelled nodes.
+- **Actor-based pool manager** — all resize decisions run in a single-goroutine event loop (`Closure`), eliminating lock contention on the hot path.
+- **Non-linear expansion** — three-phase growth curve (conservative → aggressive → converging) with pressure compensation based on queue depth.
+- **Heartbeat / health check** — periodic `Ping` rounds check idle connections and evict unhealthy ones; `OnUnhealthy` callback lets you hook in service-discovery logic.
+- **Graceful shutdown** — `Close()` drains the wait queue, stops the manager, and closes all pooled connections cleanly.
 
 ---
 
-### 2.3 Create and Use the Pool
+## Quick Start
+
+### 1. Implement the `Conn[T]` interface
 
 ```go
-pool := NewPool(config, fc)
-defer pool.Close()
+type Conn[T any] interface {
+    Create() (T, error)   // allocate a new connection
+    Reset(T)  error       // prepare a returned connection for reuse
+    Close(T)  error       // release the connection
+    Ping(T)   error       // health-check (called by the heartbeat goroutine)
+}
+```
 
-ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+Example — wrapping a plain TCP connection:
+
+```go
+type TCPConn struct{ net.Conn }
+
+type TCPControl struct{ addr string }
+
+func (c *TCPControl) Create() (*TCPConn, error) {
+    conn, err := net.Dial("tcp", c.addr)
+    if err != nil {
+        return nil, err
+    }
+    return &TCPConn{conn}, nil
+}
+
+func (c *TCPControl) Reset(t *TCPConn) error  { return nil }
+func (c *TCPControl) Close(t *TCPConn) error  { return t.Close() }
+func (c *TCPControl) Ping(t *TCPConn) error {
+    // SetDeadline trick: a zero-byte read will succeed on a live conn
+    t.SetDeadline(time.Now().Add(time.Second))
+    defer t.SetDeadline(time.Time{})
+    _, err := t.Read([]byte{})
+    if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+        return err
+    }
+    return nil
+}
+```
+
+### 2. Configure and create the pool
+
+```go
+cfg := pool.PoolConfig{
+    MinSize:          5,
+    MaxSize:          100,
+    IdleBufferFactor: 0.4,   // channel buffer = MaxSize * IdleBufferFactor
+    SurviveTime:      30 * time.Minute,
+    MonitorInterval:  10 * time.Second,
+    MaxWaitQueue:     10000,
+
+    // Heartbeat
+    PingInterval: 30 * time.Second,
+    OnUnhealthy: func(err error) {
+        log.Printf("unhealthy connection evicted: %v", err)
+        // trigger service-discovery refresh here if needed
+    },
+
+    // Reconnect on Get
+    MaxRetries:     3,
+    RetryInterval:  time.Second,
+    ReconnectOnGet: true,
+}
+
+p := pool.NewPool(cfg, &TCPControl{addr: "localhost:9000"})
+defer p.Close()
+```
+
+### 3. Get / Put
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
-res, err := pool.Get(ctx)
+res, err := p.Get(ctx)
 if err != nil {
-    panic(err)
+    // pool.ErrPoolBusy  — wait queue full, reject immediately
+    // context.DeadlineExceeded / context.Canceled — ctx expired while waiting
+    return err
 }
+defer p.Put(res)
 
-// Simulate business logic
-time.Sleep(5 * time.Millisecond)
-
-// Return resource
-if err := pool.Put(res); err != nil {
-    panic(err)
-}
+// res.Conn is your *TCPConn
+res.Conn.Write([]byte("hello"))
 ```
 
 ---
 
-## 3. Testing
+## Configuration Reference
 
-### 3.1 Core Test Functions
-
-The project provides multiple benchmark and functional tests:
-
-| Test Function                    | Purpose                                      | Key Characteristics                                   |
-| -------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| `BenchmarkStress_GetPut_RealUse` | High-concurrency stress test with real usage | Simulates 5ms usage time, concurrency from 1k to 100k |
-| `BenchmarkPool_GetPut`           | Pure scheduling benchmark                    | Tests Get/Put overhead only                           |
-| `BenchmarkStress_GetPut`         | Extreme concurrency test                     | No sleep, focuses on stability                        |
-| `TestReconnect`                  | Reconnection logic test                      | Verifies `ReconnectOnGet` behavior                    |
-
----
-
-### 3.2 Metrics Explained
-
-| Metric           | Meaning                           |
-| ---------------- | --------------------------------- |
-| `total_size`     | Total number of created resources |
-| `pool_available` | Idle resources available          |
-| `pool_in_use`    | Resources currently in use        |
-| `waiting_count`  | Requests waiting in the queue     |
-| `expanding`      | Resources being created           |
-| `successOps`     | Successful Get+Put operations     |
-| `failedOps`      | Failed operations                 |
-| `timeoutOps`     | Timeout operations                |
-| `throughput`     | Ops per second                    |
-| `avgLatency`     | Average latency (ms)              |
+| Field | Type | Default (DefaultPoolConfig) | Description |
+|---|---|---|---|
+| `MinSize` | `int64` | `5` | Connections created at startup; pool never shrinks below this. |
+| `MaxSize` | `int64` | `100` | Hard ceiling on total connections (in-use + idle). |
+| `IdleBufferFactor` | `float64` | `1.0` | `cap(resources channel) = MaxSize × factor`. Controls memory for idle slots; does **not** limit `MaxSize`. |
+| `SurviveTime` | `time.Duration` | `30m` | Maximum age of a connection before it is eligible for eviction. |
+| `MonitorInterval` | `time.Duration` | `10s` | How often the manager runs a shrink check. |
+| `MaxWaitQueue` | `int64` | `10000` | Maximum callers that can wait in the lock-free queue before `ErrPoolBusy` is returned. |
+| `PingInterval` | `time.Duration` | `30s` | Heartbeat interval. Set to `0` to disable. |
+| `OnUnhealthy` | `func(error)` | `nil` | Called each time a `Ping` fails and the connection is evicted. |
+| `MaxRetries` | `int` | `3` | Retry attempts when `Create` fails during expansion. |
+| `RetryInterval` | `time.Duration` | `1s` | Delay between `Create` retries. |
+| `ReconnectOnGet` | `bool` | `true` | If `true`, a failed `Reset` on `Get` triggers one reconnect attempt before returning an error. |
 
 ---
 
-## 4. Core Design Principles
+## How It Works
 
-### 4.1 Get Flow Design
+### Pool sizing
 
-The `Pool.Get` method follows a **four-stage pipeline**:
+```
+totalSize  = connections currently managed (in-use + idle)
+bufferSize = cap(resources channel) = MaxSize × IdleBufferFactor
 
-1. **Fast Path** — non-blocking attempt from idle queue
-2. **Slow Path** — lightweight wait + retry
-3. **Async Expansion Trigger** — Actor-based scaling
-4. **Blocking Wait** — lock-free queue with timeout control
+totalSize can reach MaxSize regardless of bufferSize.
+bufferSize only controls how many idle connections sit in the channel at once.
+```
 
-This design keeps the hot path extremely fast while offloading heavy logic to the Actor.
+### Expansion — three-phase curve
 
----
+The pool manager calculates `expandSize` based on how full the pool is relative to `[MinSize, MaxSize]`:
 
-### 4.2 Utility Components
+```
+usageRate = (totalSize - MinSize) / (MaxSize - MinSize)
 
-#### request_queue (Lock-Free Queue)
+< 20%  → conservative: +15 per round
+20–75% → aggressive:   +remaining/2 per round
+> 75%  → converging:   +remaining/8 per round
 
-* CAS-based lock-free design
-* O(1) enqueue / remove / length
-* Acts as a pressure buffer under high concurrency
+pressureStep = waitingCount / 3   (/ 2 if waitingCount > 100)
+finalStep    = max(curveStep, pressureStep), capped at MaxSize/3
+```
 
-#### closure (Actor Base)
+Expansion is triggered when:
+- there are waiters **and** `totalSize < MaxSize`, or
+- the idle buffer utilisation drops below 30% (most connections in use).
 
-* Encapsulates state and behavior
-* All pool size changes happen inside the Actor
-* Eliminates shared-state contention
+### Shrink
 
----
+Shrink fires when idle buffer utilisation exceeds 90%, no one is waiting, and `totalSize > MinSize`. Each shrink round removes at most 20% of the surplus above `MinSize`.
 
-### 4.3 Pool Manager (Actor-Based)
+### Heartbeat
 
-The `PoolManager` is responsible for:
+Every `PingInterval` a background goroutine pulls up to 5 idle connections from the channel, calls `Ping` on each, then:
+- **healthy** → returned to the channel (or handed directly to a new waiter).
+- **unhealthy** → closed, `totalSize` decremented, manager asked to refill, `OnUnhealthy` called.
 
-* Capacity adjustment (expand / shrink)
-* Idle resource cleanup
-* Failure retries
-* Expansion batching and rate limiting
+The round is skipped entirely if any waiter is in the queue, so heartbeats never starve active callers.
 
-All state mutations happen **inside the Actor**, guaranteeing thread safety without locks.
+### Wait queue
 
----
-
-## 5. Benchmark Results (Real Use)
-
-| Concurrency | Throughput (ops/s) | Avg Latency (ms) | Timeout Rate |
-| ----------- | ------------------ | ---------------- | ------------ |
-| 1,000       | ~45,000            | ~22              | 0%           |
-| 10,000      | ~180,000           | ~55              | <0.5%        |
-| 50,000      | ~250,000           | ~200             | <2%          |
-
-### Key Observations
-
-* Throughput plateaus once the pool hits `MaxSize`
-* Idle buffer tuning significantly reduces waiting pressure
-* Lock-free queue remains stable under extreme load
+`Get` enqueues a `LockFreeWaiter` backed by a buffered `chan T`. When a connection becomes available (`Put`, expansion, or heartbeat), `TryDequeue` does a CAS to hand it directly to the first non-cancelled waiter, bypassing the channel entirely. Cancelled waiters are lazily removed during the next `TryDequeue` pass.
 
 ---
 
-## 6. Future Improvements
+## Errors
 
-* Resource pre-warming on startup
-* Adaptive expansion thresholds
-* Priority-based resource allocation
-* Metrics & alerting integration
-* Reset cost optimization
+| Error | When |
+|---|---|
+| `pool.ErrPoolBusy` | `waitQueue.Len() >= MaxWaitQueue` at the time of `Get`. |
+| `context.DeadlineExceeded` / `context.Canceled` | The caller's context expired while waiting in the queue. |
+| `"pool closed"` | `Get` was waiting when `Close()` drained the queue. |
+
+---
+
+## Stats
+
+```go
+stats, _ := p.Stats(context.Background())
+// map[string]int64{
+//   "total_size":     current total connections,
+//   "pool_available": idle connections in the channel,
+//   "pool_in_use":    connections currently checked out,
+//   "waiting_count":  callers blocked in the wait queue,
+//   "expanding":      connections being created right now,
+//   "buffer_cap":     cap(resources channel),
+// }
+```
+
+---
+
+## Integrating `OnUnhealthy` with Service Discovery
+
+A common pattern when using the pool in front of a remote service (e.g. gRPC):
+
+```go
+OnUnhealthy: func(err error) {
+    // The Ping implementation can embed the failure reason.
+    // Distinguish connection-level failure from stream-level failure
+    // and act accordingly.
+    if isConnFailure(err) {
+        // Signal your service registry to re-resolve the address
+        // and rebuild the pool for this target.
+        serviceDiscovery.TriggerRefresh(addr)
+    }
+    // Stream-level failures: the pool's own checkAndAdjust
+    // will replenish — no external action needed.
+},
+```
+
+The callback runs in the heartbeat goroutine, so keep it non-blocking (spawn a goroutine or send to a channel if the work is heavy).
 
 ---
 
