@@ -183,12 +183,18 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 
 			var conn T
 			var err error
-			for retry := 0; retry < 3; retry++ {
+			maxRetries := s.config.MaxRetries
+			if maxRetries < 1 {
+				maxRetries = 1
+			}
+			for retry := 0; retry < maxRetries; retry++ {
 				conn, err = a.connControl.Create()
 				if err == nil {
 					break
 				}
-				time.Sleep(5 * time.Millisecond)
+				if retry < maxRetries-1 {
+					time.Sleep(s.config.RetryInterval)
+				}
 			}
 			if err != nil {
 				a.expanding.Add(-1)
@@ -218,7 +224,7 @@ func (a *PoolManagerActor[T]) expand(s *PoolManagerState[T], expandSize int64) {
 	}
 }
 
-// shrink 缩容逻辑
+// shrink 缩容逻辑（优先驱逐超龄连接）
 func (a *PoolManagerActor[T]) shrink(s *PoolManagerState[T]) {
 	currentTotal := a.poolTotalSize.Load()
 	target := currentTotal - s.config.MinSize
@@ -235,15 +241,57 @@ func (a *PoolManagerActor[T]) shrink(s *PoolManagerState[T]) {
 		shrinkSize = target
 	}
 
-	closedCount := int64(0)
-	for closedCount < shrinkSize {
+	// 两阶段缩容：先收集连接，优先关闭超龄的
+	// 第一阶段：收集一批连接
+	type candidate struct {
+		r       *resource[T]
+		expired bool
+	}
+	candidates := make([]candidate, 0, shrinkSize)
+	collected := int64(0)
+	for collected < shrinkSize {
 		select {
 		case r := <-a.sharedResources:
+			expired := s.config.SurviveTime > 0 && time.Since(r.createTime) > s.config.SurviveTime
+			candidates = append(candidates, candidate{r: r, expired: expired})
+			collected++
+		default:
+			goto process
+		}
+	}
+
+process:
+	if len(candidates) == 0 {
+		return
+	}
+
+	// 第二阶段：优先关闭超龄连接，不足再关正常连接，剩余的放回
+	survivors := make([]*resource[T], 0)
+	closedCount := int64(0)
+	for _, c := range candidates {
+		if c.expired {
+			a.connControl.Close(c.r.Conn)
+			a.poolTotalSize.Add(-1)
+			closedCount++
+		} else {
+			survivors = append(survivors, c.r)
+		}
+	}
+
+	// 如果超龄连接不够缩容目标，从正常连接中继续关闭
+	for _, r := range survivors {
+		if closedCount >= shrinkSize {
+			// 已达目标，剩余放回
+			select {
+			case a.sharedResources <- r:
+			default:
+				a.connControl.Close(r.Conn)
+				a.poolTotalSize.Add(-1)
+			}
+		} else {
 			a.connControl.Close(r.Conn)
 			a.poolTotalSize.Add(-1)
 			closedCount++
-		default:
-			return // 没有更多可关闭的了
 		}
 	}
 }

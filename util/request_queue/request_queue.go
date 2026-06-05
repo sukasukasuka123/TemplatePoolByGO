@@ -128,17 +128,14 @@ func (q *LockFreeQueue[T]) TryDequeue(resource T) bool {
 	return false
 }
 
-// recycle 回收 channel 到池中（异步回收）
+// recycle 回收 channel 到池中（同步回收）
+// channel 容量为 1，drain + sync.Pool.Put 都是 O(1)，不需要异步
 func (q *LockFreeQueue[T]) recycle(ch chan T) {
-	// 异步回收，避免阻塞主流程
-	go func() {
-		// 清空 channel
-		select {
-		case <-ch:
-		default:
-		}
-		q.chanPool.Put(ch)
-	}()
+	select {
+	case <-ch:
+	default:
+	}
+	q.chanPool.Put(ch)
 }
 
 // Remove 标记节点为已取消（延迟删除）

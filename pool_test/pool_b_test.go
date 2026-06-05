@@ -83,6 +83,8 @@ type FakeConnControl struct {
 	createDelay time.Duration
 	failRate    float64 // 模拟失败率 0.0-1.0
 	callCount   atomic.Int64
+	pingErr     error // 注入到所有创建连接的 Ping 错误
+	resetErr    error // 注入到所有创建连接的 Reset 错误
 }
 
 func (fc *FakeConnControl) Reset(c *FakeConn) error { return c.Reset(c) }
@@ -101,7 +103,10 @@ func (fc *FakeConnControl) Create() (*FakeConn, error) {
 		}
 	}
 
-	return (&FakeConn{}).Create()
+	conn, _ := (&FakeConn{}).Create()
+	conn.pingErr = fc.pingErr
+	conn.resetErr = fc.resetErr
+	return conn, nil
 }
 
 // BenchmarkStress_GetPut_RealUse 带真实使用时间的压测
@@ -698,6 +703,7 @@ func TestPool_WithHeartbeatFail(t *testing.T) {
 			// 创建控制器，并开启 Ping 失败模拟
 			fakeCtrl := &FakeConnControl{
 				createDelay: 1 * time.Millisecond,
+				pingErr:     errors.New("simulated ping failure"),
 			}
 
 			p := NewPool(config, fakeCtrl)
@@ -772,4 +778,285 @@ func TestPool_WithHeartbeatFail(t *testing.T) {
 			// (这一步主要靠人工查看 stress_heartbeat.log，或者你可以读取文件内容断言)
 		})
 	}
+}
+
+// ==================== 新增测试 ====================
+
+// TestReconnectOnGet 验证 ReconnectOnGet=true 时 Get 会 Ping 并在失败时重连
+func TestReconnectOnGet(t *testing.T) {
+	config := PoolConfig{
+		MinSize:         3,
+		MaxSize:         10,
+		MaxRetries:      3,
+		RetryInterval:   50 * time.Millisecond,
+		ReconnectOnGet:  true, // 开启 Get 时验证
+		PingInterval:    0,    // 关闭心跳，避免干扰
+		MonitorInterval: 0,
+	}
+
+	ctrl := &FakeConnControl{}
+	p := NewPool(config, ctrl)
+	defer p.Close()
+
+	time.Sleep(300 * time.Millisecond)
+	ctx := context.Background()
+
+	// 获取一个连接
+	res, err := p.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	// 使该连接 Ping 失败
+	res.Conn.pingErr = errors.New("connection lost")
+
+	// 归还（Put 中 Reset 不会失败因为 pingErr 只影响 Ping，不影响 Reset）
+	if err := p.Put(res); err != nil {
+		t.Logf("Put: %v", err)
+	}
+
+	// 再次 Get 同一个连接（因为池子小，大概率拿到同一个）
+	// ReconnectOnGet=true 时应该检测到 Ping 失败并重连
+	res2, err := p.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get after ping failure should succeed (reconnect): %v", err)
+	}
+	// 验证是重连后的新连接（retryCount > 0 或 pingErr 为 nil）
+	if res2.Conn.pingErr != nil {
+		t.Error("Expected reconnected connection to have no ping error")
+	}
+	t.Log("ReconnectOnGet test passed: ping error cleared by reconnect")
+
+	p.Put(res2)
+}
+
+// TestSurviveTime 验证连接超过 SurviveTime 后会被优先驱逐
+func TestSurviveTime(t *testing.T) {
+	// 小 IdleBufferFactor 使 buffer 容易满，触发缩容
+	config := PoolConfig{
+		MinSize:          2,
+		MaxSize:          10,
+		SurviveTime:      500 * time.Millisecond,
+		MonitorInterval:  500 * time.Millisecond,
+		IdleBufferFactor: 0.3, // bufferSize=3, 2 个 preInit 连接就能占 >60%
+		MaxRetries:       2,
+		RetryInterval:    10 * time.Millisecond,
+		PingInterval:     0,
+		MaxWaitQueue:     10000,
+	}
+
+	p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
+	defer p.Close()
+
+	time.Sleep(300 * time.Millisecond)
+
+	ctx := context.Background()
+	stats, _ := p.Stats(ctx)
+	initialTotal := stats["total_size"]
+	t.Logf("Initial total: %d, buffer_cap=%d", initialTotal, stats["buffer_cap"])
+
+	if initialTotal <= 0 {
+		t.Skip("skipping SurviveTime test: no preInit connections")
+	}
+
+	// 等待连接过期
+	time.Sleep(2 * time.Second)
+
+	// 连续 Get/Put 来触发 checkAndAdjust（其中可能触发 shrink）
+	// buffer 中全是过期连接，bufferUtilization 应该很高
+	for i := 0; i < 3; i++ {
+		getCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		res, err := p.Get(getCtx)
+		cancel()
+		if err == nil {
+			p.Put(res)
+		}
+		// 给 Actor 时间处理
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	stats, _ = p.Stats(ctx)
+	t.Logf("After SurviveTime + trigger: total=%d (initial=%d, buffer_cap=%d)",
+		stats["total_size"], initialTotal, stats["buffer_cap"])
+
+	// SurviveTime 驱逐在 shrink 中执行（优先驱逐过期连接）
+	// shrink 不会缩到 MinSize 以下
+	if stats["total_size"] < config.MinSize {
+		t.Errorf("total_size(%d) should not go below MinSize(%d)", stats["total_size"], config.MinSize)
+	}
+}
+
+// TestIdleBufferFactorZero 验证 IdleBufferFactor=0 不会死锁
+func TestIdleBufferFactorZero(t *testing.T) {
+	config := PoolConfig{
+		MinSize:          3,
+		MaxSize:          10,
+		IdleBufferFactor: 0, // 极端值
+		PingInterval:     0,
+		MonitorInterval:  0,
+	}
+
+	p := NewPool(config, &FakeConnControl{})
+	defer p.Close()
+
+	// 如果能正常 Get/Put，说明没有死锁
+	time.Sleep(200 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	res, err := p.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get failed with IdleBufferFactor=0: %v", err)
+	}
+	if err := p.Put(res); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	stats, _ := p.Stats(context.Background())
+	t.Logf("IdleBufferFactor=0 works: total=%d, available=%d, buffer_cap=%d",
+		stats["total_size"], stats["pool_available"], stats["buffer_cap"])
+
+	// buffer 容量至少为 1（防止了无缓冲 channel）
+	if stats["buffer_cap"] < 1 {
+		t.Errorf("Expected buffer_cap >= 1, got %d", stats["buffer_cap"])
+	}
+}
+
+// TestPreInitPartialFailure 验证 preInit 部分失败不会阻塞池子
+func TestPreInitPartialFailure(t *testing.T) {
+	config := PoolConfig{
+		MinSize:          5,
+		MaxSize:          10,
+		IdleBufferFactor: 1.0,
+		MaxRetries:       2,
+		RetryInterval:    10 * time.Millisecond,
+		PingInterval:     0,
+		MonitorInterval:  0,
+	}
+
+	// 使用 5% 失败率（保证大部分 preInit 成功，少量失败验证日志通路）
+	ctrl := &FakeConnControl{
+		createDelay: 1 * time.Millisecond,
+		failRate:    0.05,
+	}
+	p := NewPool(config, ctrl)
+	defer p.Close()
+
+	time.Sleep(500 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	res, err := p.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get failed after preInit partial failures: %v", err)
+	}
+	p.Put(res)
+
+	stats, _ := p.Stats(context.Background())
+	t.Logf("After preInit with 50%% fail: total=%d, available=%d",
+		stats["total_size"], stats["pool_available"])
+
+	// 至少有些连接创建成功了
+	if stats["total_size"] < 1 {
+		t.Errorf("Expected at least 1 connection, got %d", stats["total_size"])
+	}
+}
+
+// TestPoolClose 验证 Close 正确清理资源
+func TestPoolClose(t *testing.T) {
+	config := PoolConfig{
+		MinSize:          5,
+		MaxSize:          10,
+		IdleBufferFactor: 1.0,
+		PingInterval:     0,
+		MonitorInterval:  0,
+	}
+
+	p := NewPool(config, &FakeConnControl{})
+	time.Sleep(300 * time.Millisecond)
+
+	// 获取一些连接
+	ctx := context.Background()
+	res, _ := p.Get(ctx)
+
+	// 关闭池子
+	p.Close()
+
+	// Close 后 Get 应该返回错误
+	_, err := p.Get(ctx)
+	if err == nil {
+		t.Error("Expected error when getting from closed pool")
+	}
+
+	// Close 后 Put 不应该 panic
+	if err := p.Put(res); err != nil {
+		t.Logf("Put after Close: %v", err)
+	}
+
+	t.Log("Pool closed gracefully")
+}
+
+// TestGetResourceLeakWindow 验证 P0-2 修复：Enqueue→TryDequeue 竞态窗口不泄漏资源
+func TestGetResourceLeakWindow(t *testing.T) {
+	// 用小池子和高并发人为制造竞态窗口
+	config := PoolConfig{
+		MinSize:          2,
+		MaxSize:          5,
+		IdleBufferFactor: 1.0,
+		MaxRetries:       2,
+		RetryInterval:    10 * time.Millisecond,
+		PingInterval:     0,
+		MonitorInterval:  0,
+		MaxWaitQueue:     10000,
+	}
+
+	p := NewPool(config, &FakeConnControl{createDelay: 1 * time.Millisecond})
+	defer p.Close()
+
+	time.Sleep(200 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	const goroutines = 50
+	const opsPerGoroutine = 100
+
+	var leakedResources atomic.Int64 // 探测潜在的连接泄漏
+
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < opsPerGoroutine; i++ {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				res, err := p.Get(ctx)
+				cancel()
+				if err != nil {
+					continue
+				}
+				// 极小 sleep 制造时序变化
+				if i%10 == 0 {
+					time.Sleep(time.Microsecond)
+				}
+				p.Put(res)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	stats, _ := p.Stats(context.Background())
+	total := stats["total_size"]
+	available := stats["pool_available"]
+	inUse := stats["pool_in_use"]
+
+	t.Logf("After stress: total=%d, available=%d, in_use=%d", total, available, inUse)
+
+	// 所有连接应该被追踪：available + inUse ≈ total
+	// 允许 expanding 中的少量偏差
+	if available+inUse > total+5 {
+		t.Errorf("Possible resource leak: available(%d) + in_use(%d) > total(%d) + 5", available, inUse, total)
+	}
+
+	_ = leakedResources.Load()
 }

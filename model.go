@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +42,9 @@ func NewPool[T any](config PoolConfig, connControl Conn[T]) *Pool[T] {
 	//
 	// 关键：buffer 不应该限制 totalSize，只是控制内存占用！
 	bufferSize := int(float64(config.MaxSize) * config.IdleBufferFactor)
+	if bufferSize < 1 {
+		bufferSize = 1 // 防止 IdleBufferFactor=0 时创建无缓冲 channel 导致死锁
+	}
 
 	p := &Pool[T]{
 		resources:        make(chan *resource[T], bufferSize),
@@ -61,6 +65,9 @@ func NewPool[T any](config PoolConfig, connControl Conn[T]) *Pool[T] {
 	go p.preInit(config.MinSize, connControl)
 	if config.PingInterval > 0 {
 		go p.pingIdleResources(p.closeCtx)
+	}
+	if config.MonitorInterval > 0 {
+		go p.monitorAndAdjust(p.closeCtx)
 	}
 	return p
 }
@@ -83,37 +90,66 @@ func (p *Pool[T]) pingIdleResources(ctx context.Context) {
 	}
 }
 
+// monitorAndAdjust 定期触发缩容/扩容检查（将 MonitorInterval 配置落到实处）
+func (p *Pool[T]) monitorAndAdjust(ctx context.Context) {
+	interval := p.config.MonitorInterval
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
+				a.checkAndAdjust(s)
+			})
+		}
+	}
+}
+
 func (p *Pool[T]) doPingRound() {
 	if p.waitQueue.Len() > 0 {
 		return
 	}
 
-	batch := make([]*resource[T], 0, 5)
-	for i := 0; i < 5; i++ {
+	batch := p.collectPingBatch(5)
+	if len(batch) == 0 {
+		return
+	}
+	p.processPingBatch(batch)
+}
+
+// collectPingBatch 从 resources channel 取最多 maxCount 个连接
+// 中途有等待者进来则放回已取连接并返回 nil
+func (p *Pool[T]) collectPingBatch(maxCount int) []*resource[T] {
+	batch := make([]*resource[T], 0, maxCount)
+	for i := 0; i < maxCount; i++ {
 		if p.waitQueue.Len() > 0 {
-			// 有新的等待者进来了，把已取出的放回去
+			// 有等待者进来了，放回已取连接
 			for _, r := range batch {
-				select {
-				case p.resources <- r:
-				default:
-					p.connControl.Close(r.Conn)
-					p.totalSize.Add(-1)
-				}
+				p.tryReturnOrClose(r)
 			}
-			return
+			return nil
 		}
 		select {
 		case r := <-p.resources:
 			batch = append(batch, r)
 		default:
-			// channel 空了
-			goto ping
+			return batch // channel 已空
 		}
 	}
+	return batch
+}
 
-ping:
+// processPingBatch 对一批连接执行 Ping，健康则放回，不健康则驱逐
+func (p *Pool[T]) processPingBatch(batch []*resource[T]) {
 	for _, r := range batch {
 		if err := p.connControl.Ping(r.Conn); err != nil {
+			// 不健康：异步通知 Actor 关闭并检查是否需要补充
 			_ = p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
 				a.connControl.Close(r.Conn)
 				a.poolTotalSize.Add(-1)
@@ -123,38 +159,48 @@ ping:
 				p.config.OnUnhealthy(err)
 			}
 		} else {
+			// 健康：优先给等待者，否则放回
 			if p.waitQueue.TryDequeue(r) {
 				continue
 			}
-			select {
-			case p.resources <- r:
-				// 放回后再检查一次，处理放回瞬间进来的新等待者
-				if p.waitQueue.Len() > 0 {
-					select {
-					case r2 := <-p.resources:
-						if !p.waitQueue.TryDequeue(r2) {
-							select {
-							case p.resources <- r2:
-							default:
-								p.connControl.Close(r2.Conn)
-								p.totalSize.Add(-1)
-							}
-						}
-					default:
-					}
-				}
-			default:
-				p.connControl.Close(r.Conn)
-				p.totalSize.Add(-1)
-			}
+			p.tryReturnOrClose(r)
 		}
 	}
 }
 
+// tryReturnOrClose 尝试将资源放回 channel，放回后二次检查是否有等待者
+// channel 满时关闭连接
+func (p *Pool[T]) tryReturnOrClose(r *resource[T]) {
+	select {
+	case p.resources <- r:
+		// 放回后二次检查：放回瞬间可能有新等待者
+		if p.waitQueue.Len() > 0 {
+			select {
+			case r2 := <-p.resources:
+				if !p.waitQueue.TryDequeue(r2) {
+					select {
+					case p.resources <- r2:
+					default:
+						p.connControl.Close(r2.Conn)
+						p.totalSize.Add(-1)
+					}
+				}
+			default:
+			}
+		}
+	default:
+		p.connControl.Close(r.Conn)
+		p.totalSize.Add(-1)
+	}
+}
+
 func (p *Pool[T]) preInit(count int64, cc Conn[T]) {
+	var failed int64
 	for i := int64(0); i < count; i++ {
 		conn, err := cc.Create()
 		if err != nil {
+			failed++
+			log.Printf("[TemplatePoolByGO] preInit: failed to create connection %d/%d: %v", i+1, count, err)
 			continue
 		}
 		p.totalSize.Add(1)
@@ -164,6 +210,10 @@ func (p *Pool[T]) preInit(count int64, cc Conn[T]) {
 			updateTime: time.Now(),
 			Conn:       conn,
 		}
+	}
+	created := count - failed
+	if failed > 0 {
+		log.Printf("[TemplatePoolByGO] preInit: %d/%d connections created successfully, %d failed", created, count, failed)
 	}
 	_ = p.manager.Send(func(a *PoolManagerActor[T], s *PoolManagerState[T]) {
 		a.initialized.Store(true)
@@ -185,6 +235,21 @@ func (p *Pool[T]) Get(ctx context.Context) (*resource[T], error) {
 	select {
 	case r := <-p.resources:
 		p.waitQueue.Remove(waiter)
+		// 排空 Enqueue→Remove 竞态窗口内 TryDequeue 投递到 waiter.Ch 的资源
+		// 如果不排空，该资源会永久丢失（goroutine 泄漏 + 连接泄漏）
+		select {
+		case delivered := <-waiter.Ch:
+			// 尝试直接交给下一个等待者，放不回则放回 resources channel
+			if !p.waitQueue.TryDequeue(delivered) {
+				select {
+				case p.resources <- delivered:
+				default:
+					p.connControl.Close(delivered.Conn)
+					p.totalSize.Add(-1)
+				}
+			}
+		default:
+		}
 		return p.validateAndReturn(r)
 	default:
 	}
@@ -246,6 +311,25 @@ func (p *Pool[T]) Put(res *resource[T]) error {
 }
 
 func (p *Pool[T]) validateAndReturn(r *resource[T]) (*resource[T], error) {
+	// 如果配置了 Get 时验证连接存活，则 Ping 检测
+	if p.config.ReconnectOnGet {
+		if err := p.connControl.Ping(r.Conn); err != nil {
+			// Ping 失败，尝试重连
+			for retry := 0; retry < p.config.MaxRetries; retry++ {
+				newConn, createErr := p.connControl.Create()
+				if createErr == nil {
+					p.connControl.Close(r.Conn)
+					r.Conn = newConn
+					r.createTime = time.Now()
+					r.retryCount++
+					break
+				}
+				if retry < p.config.MaxRetries-1 {
+					time.Sleep(p.config.RetryInterval)
+				}
+			}
+		}
+	}
 	p.inUse.Add(1)
 	r.updateTime = time.Now()
 	return r, nil

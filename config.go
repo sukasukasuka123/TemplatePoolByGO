@@ -43,7 +43,7 @@ func DefaultPoolConfig() PoolConfig {
 		IdleBufferFactor: 1.0,
 		MaxRetries:       3,
 		RetryInterval:    1 * time.Second,
-		ReconnectOnGet:   true,
+		ReconnectOnGet:   false, // Get 时 Ping 失败是否自动重连（默认关闭，避免热路径开销）
 		PingInterval:     30 * time.Second,
 		OnUnhealthy:      nil,
 		MaxWaitQueue:     10000,
