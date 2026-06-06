@@ -3,7 +3,7 @@
 基于 Go 泛型的通用连接池，管理 gRPC stream、数据库连接、TCP 长连接等重资源。
 
 ```bash
-go get github.com/sukasukasuka123/TemplatePoolByGO@latest
+go get github.com/RedHuang-0622/TemplatePoolByGO@latest
 ```
 
 **要求 Go ≥ 1.23**（使用了泛型类型别名 `type resource[T] = Resource[T]`）。

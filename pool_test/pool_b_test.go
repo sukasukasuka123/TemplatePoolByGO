@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/sukasukasuka123/TemplatePoolByGO"
+	. "github.com/RedHuang-0622/TemplatePoolByGO"
 )
 
 // 压测配置

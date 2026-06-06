@@ -3,7 +3,7 @@
 A generic, production-ready connection pool for Go, built on a lock-free wait queue and an actor-based pool manager.
 
 ```
-go get github.com/sukasukasuka123/TemplatePoolByGO@v0.1.7
+go get github.com/RedHuang-0622/TemplatePoolByGO@v0.1.7
 ```
 
 ---

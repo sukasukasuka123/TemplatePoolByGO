@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/sukasukasuka123/TemplatePoolByGO"
+	. "github.com/RedHuang-0622/TemplatePoolByGO"
 
 	_ "github.com/go-sql-driver/mysql"
 )

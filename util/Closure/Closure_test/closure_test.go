@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	closure "github.com/sukasukasuka123/TemplatePoolByGO/util/Closure"
+	closure "github.com/RedHuang-0622/TemplatePoolByGO/util/Closure"
 )
 
 // ───────────────────────────────────────────────

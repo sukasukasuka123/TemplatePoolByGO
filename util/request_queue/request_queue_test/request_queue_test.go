@@ -7,7 +7,7 @@ import (
 	"time"
 
 	// 确保路径正确，或使用相对路径
-	. "github.com/sukasukasuka123/TemplatePoolByGO/util/request_queue"
+	. "github.com/RedHuang-0622/TemplatePoolByGO/util/request_queue"
 )
 
 // 辅助函数：由于原代码没写 IsEmpty，这里手动检查 Len

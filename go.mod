@@ -1,4 +1,4 @@
-module github.com/sukasukasuka123/TemplatePoolByGO
+module github.com/RedHuang-0622/TemplatePoolByGO
 
 go 1.23
 
